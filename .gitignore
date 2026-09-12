@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+config/*.json
+.env
+
+# Assistant / AI tooling -- kept on disk, never tracked. See AGENTS.md.
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-*
+.continue/
+.windsurfrules
+*.session.md
+
+# Vendored third-party skills -- untracked until their licences are cleared for
+# redistribution. The manifest at .agents/skills/VENDORED.md IS tracked.
+.agents/skills/test-driven-development/
