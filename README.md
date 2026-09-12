@@ -6,9 +6,6 @@ Built software first: everything here runs on a laptop with no Pi, no Arduino
 and no wires. Hardware arrives behind two interfaces, so Phases 1 and 2 add an
 implementation and change one line of wiring-up code each.
 
-Build plan, parts list and phase checklist:
-<https://claude.ai/code/artifact/ecbe4ac4-fc03-425d-8641-4b2c3a6ecacd>
-
 ## Running it
 
 ```sh

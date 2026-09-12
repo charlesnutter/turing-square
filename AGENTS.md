@@ -6,9 +6,6 @@ browser is a pure view. Three modes: over-the-board, versus a local engine, and
 online via the Lichess Board API. Plus "suggest a move" and "explain why that
 move was good or bad."
 
-Build plan, phase checklist and parts list:
-<https://claude.ai/code/artifact/ecbe4ac4-fc03-425d-8641-4b2c3a6ecacd>
-
 ---
 
 ## Architecture invariants
