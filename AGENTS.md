@@ -205,7 +205,42 @@ point of the filename.
 
 ## Skills
 
-Already available in Claude Code, no install needed:
+Three different things get called "skills". They live in different places and
+only one of them belongs in this repo.
+
+### Project skills — in the repo, tracked
+
+Skills written for this build. They are stored in the vendor-neutral location
+defined by the Agent Skills format, and symlinked into the one place Claude Code
+actually looks:
+
+```
+.agents/skills/<name>/SKILL.md    tracked — the source of truth
+.claude/skills/<name>             gitignored symlink → ../../.agents/skills/<name>
+```
+
+Claude Code reads only `.claude/skills/`, `~/.claude/skills/` and plugin bundles;
+it does not read `.agents/`. Symlinked skill entries are supported and load once
+even when several locations point at the same target. Keeping the real files
+under `.agents/` means the skills travel with a clone while the repo stays
+vendor-neutral and free of `Claude`-named paths.
+
+**After cloning, recreate the symlinks** — they are deliberately not tracked:
+
+```sh
+mkdir -p .claude/skills
+for s in .agents/skills/*/; do
+  ln -sfn "../../$s" ".claude/skills/$(basename "$s")"
+done
+```
+
+Current project skills:
+
+| Skill | Use it for |
+|---|---|
+| `move-detection-review` | Any change to the matcher, the occupancy model, or their tests |
+
+### Built in — nothing to install
 
 | Skill | Use it for |
 |---|---|
@@ -214,7 +249,11 @@ Already available in Claude Code, no install needed:
 | `/simplify` | Quality pass on changed code — no bug hunting |
 | `/run` | Launching the app to confirm a change works for real |
 
-Worth installing:
+### Plugins — optional, per-machine, NOT installed
+
+These are suggestions, not a manifest. Nothing reads this file and installs
+anything, and plugins land in `~/.claude/plugins/` on one machine rather than in
+the repo. Install them only if you want them:
 
 ```
 # TDD, systematic debugging, verification-before-completion (MIT)
@@ -225,8 +264,8 @@ Worth installing:
 /plugin marketplace add anthropics/skills
 ```
 
-Skills can also be pulled from the directory at <https://skills.sh> with
-`npx skills add <owner/repo>`, which targets Claude Code among other agents.
+The directory at <https://skills.sh> lists more, installable with
+`npx skills add <owner/repo>`.
 
-**Before adding a skill, check it earns its place.** The dependency policy above
-applies to tooling too.
+**Before adding any of it, check it earns its place.** The dependency policy
+above applies to tooling too.
