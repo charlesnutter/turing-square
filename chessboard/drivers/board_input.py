@@ -88,3 +88,31 @@ class KeyboardInput(BoardInput):
         except ValueError:
             self._echo(f"  ?  {text!r} is not a move I can read")
             return None
+
+
+class EngineInput(BoardInput):
+    """An engine as a move source.
+
+    The game core cannot tell this from a keyboard, which is the whole point --
+    it is the same swap Phase 2 makes when 64 magnets replace typing. Anything
+    with a `play(board) -> Move` method works here; nothing imports the engine.
+    """
+
+    def __init__(self, engine, announce: Optional[Callable[[str], None]] = None,
+                 name: str = "engine"):
+        self._engine = engine
+        self._announce = announce
+        self._name = name
+
+    def next_move(self, board: chess.Board) -> Optional[chess.Move]:
+        if self._announce:
+            self._announce(f"  {self._name} is thinking...")
+        try:
+            return self._engine.play(board)
+        except KeyboardInterrupt:
+            raise Quit from None
+
+    def close(self) -> None:
+        closer = getattr(self._engine, "close", None)
+        if closer:
+            closer()
