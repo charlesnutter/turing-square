@@ -80,26 +80,41 @@ much of it exists and was read line by line.
 
 ---
 
-## Licensing — OPEN DECISION, do not vendor AGPL code until it is resolved
+## Licensing — settled, and it constrains how the coach gets written
 
-This repo is **Apache-2.0 and public**. The plan calls for vendoring the tactical
-motif detectors from `ornicar/lichess-puzzler` (`tagger/cook.py`), which is
-**AGPL-3.0**. Those are not compatible in this direction: Apache-2.0 flows into
-AGPL, not out of it. Vendoring `cook.py` into a public repo means the distributed
-combined work must be AGPL-3.0.
+This repo is **Apache-2.0 and public, and stays that way.**
 
-Three ways out, none chosen yet:
+`cook.py` from `ornicar/lichess-puzzler` is **AGPL-3.0**. Copyleft only flows one
+way: permissive code can be absorbed into an AGPL work, but AGPL code can never
+be redistributed under a permissive licence. So:
 
-1. **Relicense this repo AGPL-3.0.** Simplest if the code is never going into
-   anything proprietary.
-2. **Stay Apache-2.0 and reimplement** the handful of motifs actually needed
-   (fork, pin, skewer, hanging piece, back-rank) over `python-chess`. The full
-   40+ detector set is not required for a coach that explains one move.
-3. **Keep the detectors in a separate AGPL-3.0 repo** and treat them as an
-   optional component. Cleanest in theory, murkiest in practice.
+- **No AGPL-licensed code enters this repo.** Not vendored, not copied, not
+  adapted line-by-line.
+- **Reading `cook.py` for its logic is fine. Copying it is not.** The point of no
+  return is the first copied line — untangling it afterwards means rewriting from
+  scratch to prove clean-room, so stay on the right side of it from the start.
+- The motif detectors get **written here**, over `python-chess`. Eight are worth
+  writing (see below); the rest of Lichess's ~58 tags are either free from
+  Stockfish, one-line queries, or puzzle-database bookkeeping that explains
+  nothing to a player.
 
-Until this is decided: **no AGPL-licensed code in this repo.** Reading it for
-reference is fine; copying it is not.
+### The eight detectors
+
+`hanging piece` · `fork` · `pin` (nearly free — `board.pin()` and
+`board.is_pinned()` are built in) · `skewer` · `discovered attack` · `back-rank
+vulnerability` · `trapped piece` · `defender removed`.
+
+That last one is the important collapse: deflection, attraction, interference,
+self-interference, clearance and capturing-defender are six separate tags in a
+puzzle database, because someone filtering for deflection wants exactly
+deflection. A coach explaining one move needs none of that discrimination — all
+six produce the same sentence ("this pulls the rook off the back rank"). Compute
+*"piece X no longer defends square Y"* once, phrase it once.
+
+Most explanatory value is in the positional feature layer anyway (castling
+rights, centre control, king shield, pawn structure, mobility, hanging
+material), and nothing in `cook.py` computes any of it.
+
 
 ---
 
