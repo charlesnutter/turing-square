@@ -4,3 +4,14 @@ __pycache__/
 .pytest_cache/
 config/*.json
 .env
+
+# Assistant / AI tooling -- kept on disk, never tracked. See AGENTS.md.
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-*
+.continue/
+.windsurfrules
+*.session.md

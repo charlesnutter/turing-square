@@ -168,6 +168,31 @@ board you have already sealed.
 
 ---
 
+## Keep AI tooling out of the repo
+
+Nothing that references Claude, or any other AI assistant, belongs in version
+control. This is a chess project and the repo should read as one.
+
+Gitignored, and never to be committed:
+
+- `CLAUDE.md` and `.claude/` — kept on disk so local tooling still works, but
+  untracked
+- `.cursor/`, `.cursorrules`, `.aider*`, `.github/copilot-*`, `.continue/`,
+  `.windsurfrules`, and the equivalent for any other agent
+- Any transcript, session log, prompt file or assistant scratch note
+
+Also, and `.gitignore` cannot enforce either of these:
+
+- **No attribution trailers in commit messages.** No `Co-Authored-By` naming an
+  assistant, no session links. A commit message describes the change and nothing
+  else.
+- **Check new files by hand.** The ignore list catches the names known today; it
+  will not catch whatever the next tool decides to write.
+
+`AGENTS.md` is the deliberate exception. It stays tracked because it is project
+documentation that any contributor or tool should read — which is the whole
+point of the filename.
+
 ## Style
 
 - Match the surrounding code. Comments explain *why*, not what — the existing
