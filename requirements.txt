@@ -1,0 +1,5 @@
+chess>=1.11
+pyserial>=3.5
+fastapi>=0.115
+uvicorn>=0.30
+pytest>=8.0
