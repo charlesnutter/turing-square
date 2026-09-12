@@ -112,6 +112,15 @@ Most explanatory value is in the positional feature layer anyway (castling
 rights, centre control, king shield, pawn structure, mobility, hanging
 material), and nothing in `cook.py` computes any of it.
 
+### The same rule applies to vendored skills
+
+A skill copied into `.agents/skills/` is third-party files in this repo, under
+its own licence. Vendored skills are **gitignored until their licence is
+cleared** — using one locally is not redistribution, committing it is. The
+tracked manifest at `.agents/skills/VENDORED.md` records what is in use, its
+source, its licence and its status, and every row must be resolved before the
+project ships.
+
 
 ---
 
@@ -205,25 +214,15 @@ point of the filename.
 
 ## Skills
 
-Three different things get called "skills". They live in different places and
-only one of them belongs in this repo.
-
-### Project skills — in the repo, tracked
-
-Skills written for this build. They are stored in the vendor-neutral location
-defined by the Agent Skills format, and symlinked into the one place Claude Code
-actually looks:
+Skills live in the vendor-neutral `.agents/skills/` location defined by the Agent
+Skills format, and are symlinked into `.claude/skills/`, which is the only place
+Claude Code looks. That keeps the repo portable across agents and free of
+`Claude`-named paths; the symlinks are gitignored, so they never enter the repo.
 
 ```
-.agents/skills/<name>/SKILL.md    tracked — the source of truth
+.agents/skills/<name>/SKILL.md    the source of truth
 .claude/skills/<name>             gitignored symlink → ../../.agents/skills/<name>
 ```
-
-Claude Code reads only `.claude/skills/`, `~/.claude/skills/` and plugin bundles;
-it does not read `.agents/`. Symlinked skill entries are supported and load once
-even when several locations point at the same target. Keeping the real files
-under `.agents/` means the skills travel with a clone while the repo stays
-vendor-neutral and free of `Claude`-named paths.
 
 **After cloning, recreate the symlinks** — they are deliberately not tracked:
 
@@ -234,11 +233,28 @@ for s in .agents/skills/*/; do
 done
 ```
 
-Current project skills:
+### Written for this project — tracked
 
 | Skill | Use it for |
 |---|---|
 | `move-detection-review` | Any change to the matcher, the occupancy model, or their tests |
+
+Add to these when a mistake is worth not repeating. A skill is the right home for
+a *procedure*; the Lessons section below is the right home for a *fact*.
+
+### Vendored from the community — gitignored, licences pending
+
+| Skill | Source | Licence |
+|---|---|---|
+| `test-driven-development` | obra/superpowers | MIT |
+
+Kept deliberately small. See `.agents/skills/VENDORED.md` for the manifest, the
+install-and-relocate flow, and what has to happen before the project ships.
+
+Rejected after looking: `systematic-debugging` from the same repo ships eleven
+files of TypeScript-flavoured examples, which is a poor fit here; the Arduino
+skills on embeddedskills.dev are generic snippet generators with no stated
+licence, and would happily emit code that breaks the firmware rules above.
 
 ### Built in — nothing to install
 
@@ -249,23 +265,41 @@ Current project skills:
 | `/simplify` | Quality pass on changed code — no bug hunting |
 | `/run` | Launching the app to confirm a change works for real |
 
-### Plugins — optional, per-machine, NOT installed
+### A note on plugins
 
-These are suggestions, not a manifest. Nothing reads this file and installs
-anything, and plugins land in `~/.claude/plugins/` on one machine rather than in
-the repo. Install them only if you want them:
-
-```
-# TDD, systematic debugging, verification-before-completion (MIT)
-/plugin marketplace add obra/superpowers-marketplace
-/plugin install superpowers@superpowers-marketplace
-
-# webapp-testing, for the Phase 0 FastAPI app and web UI
-/plugin marketplace add anthropics/skills
-```
-
-The directory at <https://skills.sh> lists more, installable with
-`npx skills add <owner/repo>`.
+The same content is often also distributed through vendor plugin marketplaces,
+which install to `~/.claude/plugins/` — one machine, outside the repo, invisible
+to any other agent. This project vendors instead, so the skills travel with a
+clone and work with whatever tool reads them.
 
 **Before adding any of it, check it earns its place.** The dependency policy
-above applies to tooling too.
+applies to tooling too, and a skill is instructions that become project policy
+the moment it loads — read it before you trust it.
+
+---
+
+## Lessons — add to this when something bites
+
+A running log of things that cost time once and should not cost it twice. Keep
+entries short and concrete: what was assumed, what was true, what to do instead.
+
+- **Write the property test, not just the cases.** Six hand-written move-detection
+  cases all passed while the matcher was quietly wrong. Forty randomly played
+  games asserting "no two legal moves share an occupancy pattern" found the
+  same-origin capture collision in one run. When a case is a *class* of position,
+  test the class.
+
+- **A capture's destination square is touched, even though it does not change.**
+  Occupied before, occupied after — so a footprint built from the before/after
+  difference omits it, and every capture in progress reads as a knocked-over
+  piece. Physical footprint ≠ state difference.
+
+- **`python-chess`'s `parse_san` accepts UCI-shaped text.** It reads `e1e3` as a
+  pawn move to e3 disambiguated from e1, then raises before a `Move` object
+  exists — so illegal UCI never reached the core's explainer and players got a
+  generic error. Match UCI with a regex first, and let the core explain.
+
+- **Check where a tool writes before relying on it.** `npx skills add` installs to
+  the agent's own directory — `.claude/skills/` for Claude Code — which is
+  gitignored here. It would report success, work locally, and silently never
+  commit. Verify the path, do not assume it.

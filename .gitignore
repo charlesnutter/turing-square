@@ -15,3 +15,7 @@ CLAUDE.md
 .continue/
 .windsurfrules
 *.session.md
+
+# Vendored third-party skills -- untracked until their licences are cleared for
+# redistribution. The manifest at .agents/skills/VENDORED.md IS tracked.
+.agents/skills/test-driven-development/
