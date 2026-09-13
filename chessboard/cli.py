@@ -11,7 +11,20 @@ from .core.engine import Engine, EngineUnavailable, Strength
 from .core.game import Game
 from .drivers.board_input import EngineInput, KeyboardInput
 from .drivers.led import ConsoleLEDDriver
+from .lichess.client import Client, LichessError, load_token
+from .lichess.play import LichessGame, wait_for_game
 from .session import Session
+
+
+def _ai_level(text: str) -> int:
+    """Reject an out-of-range level at parse time, before any request is made."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number") from None
+    if not 1 <= value <= 8:
+        raise argparse.ArgumentTypeError("Lichess AI level is 1-8")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +57,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--threads", type=int, default=1, metavar="N",
                    help="engine threads (default 1)")
     p.add_argument("--fen", metavar="FEN", help="start from a position")
+
+    lichess = p.add_argument_group("lichess (needs a board:play token)")
+    lichess.add_argument("--lichess", action="store_true",
+                         help="wait for a game to start on lichess.org and play it")
+    lichess.add_argument("--lichess-ai", type=_ai_level, metavar="LEVEL",
+                         help="challenge the Lichess AI, level 1-8, and play that")
+    lichess.add_argument("--lichess-game", metavar="ID",
+                         help="play a specific game already in progress")
+    lichess.add_argument("--lichess-color", choices=("white", "black", "random"),
+                         default="white", help="your colour when challenging the AI")
+    lichess.add_argument("--token-file", metavar="PATH",
+                         help="where to read the token (default ~/.lichess-token)")
     return p
 
 
@@ -59,6 +84,9 @@ def main(argv: Optional[list] = None) -> int:
 
     leds = ConsoleLEDDriver()
     keyboard = KeyboardInput()
+
+    if args.lichess or args.lichess_ai is not None or args.lichess_game:
+        return _play_lichess(args, leds)
 
     if not versus_engine:
         session = Session(game, keyboard, leds)
@@ -97,6 +125,44 @@ def main(argv: Optional[list] = None) -> int:
         session.run()
     finally:
         session.close()
+    return 0
+
+
+def _play_lichess(args, leds: ConsoleLEDDriver) -> int:
+    try:
+        client = Client(load_token(args.token_file))
+        me = client.username()
+    except LichessError as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+    print(f"Signed in as {me}.")
+
+    try:
+        if args.lichess_game:
+            game_id = args.lichess_game
+        elif args.lichess_ai is not None:
+            created = client.challenge_ai(args.lichess_ai, color=args.lichess_color)
+            game_id = created.get("id")
+            print(f"  challenged the Lichess AI at level {args.lichess_ai}")
+        else:
+            game_id = wait_for_game(client)
+    except (LichessError, ValueError) as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 1
+
+    if not game_id:
+        print("no game to play", file=sys.stderr)
+        return 1
+
+    print(f"  watch at https://lichess.org/{game_id}")
+    print("SAN or UCI; 'moves', 'fen', 'board', 'resign', 'quit'.")
+    print("Moves you play in a browser appear here too — no takeback online.")
+    game = LichessGame(client, game_id, leds, me)
+    try:
+        game.run()
+    except LichessError as exc:
+        print(f"\nlost the game stream: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
