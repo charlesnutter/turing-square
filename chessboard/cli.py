@@ -1,19 +1,40 @@
-"""Command line entry: pick a mode, wire the drivers, run the session."""
+"""Command line entry: choose a mode, wire the drivers, run it.
+
+Four modes, two implementations. `local-human` and `local-ai` differ only in
+which producer supplies the opponent's moves; `online-human` and `online-ai`
+differ only in how the game gets created. The UI count should not drive the
+code count, and the same four map onto the buttons the tablet will show.
+"""
 
 import argparse
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 
 import chess
 import chess.engine
 
-from .core.engine import Engine, EngineUnavailable, Strength
+from .core.engine import (
+    ENGINES, EngineUnavailable, Strength, open_engine,
+)
 from .core.game import Game
 from .drivers.board_input import EngineInput, KeyboardInput
 from .drivers.led import ConsoleLEDDriver
 from .lichess.client import Client, LichessError, load_token
 from .lichess.play import LichessGame, wait_for_game
 from .session import Session
+
+LOCAL_HUMAN = "local-human"
+LOCAL_AI = "local-ai"
+ONLINE_HUMAN = "online-human"
+ONLINE_AI = "online-ai"
+MODES = (LOCAL_HUMAN, LOCAL_AI, ONLINE_HUMAN, ONLINE_AI)
+
+MODE_HELP = {
+    LOCAL_HUMAN: "two players sharing one board",
+    LOCAL_AI: "play a local engine — works with the network unplugged",
+    ONLINE_HUMAN: "play a person on lichess.org",
+    ONLINE_AI: "play Lichess's own engine",
+}
 
 
 def _ai_level(text: str) -> int:
@@ -33,48 +54,99 @@ def build_parser() -> argparse.ArgumentParser:
         description="Play from the keyboard. No hardware required.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "examples:\n"
-            "  python -m chessboard                    two players, one keyboard\n"
-            "  python -m chessboard --engine           versus Stockfish, you are White\n"
-            "  python -m chessboard --elo 1500         versus Stockfish at ~1500\n"
-            "  python -m chessboard --skill 2 --black  a gentle opponent, you are Black\n"
+            "modes:\n"
+            + "".join(f"  {m:<14}{MODE_HELP[m]}\n" for m in MODES)
+            + "\nexamples:\n"
+            "  python -m chessboard                          two players\n"
+            "  python -m chessboard --mode local-ai --elo 1500\n"
+            "  python -m chessboard --mode local-ai --skill 2 --black\n"
+            "  python -m chessboard --mode online-ai --ai-level 1\n"
+            "  python -m chessboard --mode online-human\n"
         ),
     )
-    p.add_argument("--engine", action="store_true",
-                   help="play against Stockfish (implied by --elo, --skill or --black)")
+    p.add_argument("--mode", choices=MODES,
+                   help=f"what kind of game (default {LOCAL_HUMAN}, or inferred "
+                        f"from the options below)")
     p.add_argument("--black", action="store_true",
-                   help="play Black; the engine moves first")
-    strength = p.add_mutually_exclusive_group()
-    strength.add_argument("--elo", type=int, metavar="N",
-                          help=f"engine strength, {Strength.ELO_MIN}-{Strength.ELO_MAX}")
-    strength.add_argument("--skill", type=int, metavar="N",
-                          help=f"engine skill level, {Strength.SKILL_MIN}-{Strength.SKILL_MAX} "
-                               f"-- the only way below {Strength.ELO_MIN} Elo")
-    p.add_argument("--depth", type=int, default=12, metavar="N",
-                   help="engine search depth (default 12)")
-    p.add_argument("--movetime", type=int, metavar="MS",
-                   help="milliseconds per move, instead of a depth limit")
-    p.add_argument("--threads", type=int, default=1, metavar="N",
-                   help="engine threads (default 1)")
+                   help="play Black; your opponent moves first")
     p.add_argument("--fen", metavar="FEN", help="start from a position")
 
-    lichess = p.add_argument_group("lichess (needs a board:play token)")
-    lichess.add_argument("--lichess", action="store_true",
-                         help="wait for a game to start on lichess.org and play it")
-    lichess.add_argument("--lichess-ai", type=_ai_level, metavar="LEVEL",
-                         help="challenge the Lichess AI, level 1-8, and play that")
-    lichess.add_argument("--lichess-game", metavar="ID",
-                         help="play a specific game already in progress")
-    lichess.add_argument("--lichess-color", choices=("white", "black", "random"),
-                         default="white", help="your colour when challenging the AI")
-    lichess.add_argument("--token-file", metavar="PATH",
-                         help="where to read the token (default ~/.lichess-token)")
+    local = p.add_argument_group("local engine (--mode local-ai)")
+    local.add_argument("--engine", choices=sorted(ENGINES), default="stockfish",
+                       help="which local engine (default stockfish)")
+    strength = local.add_mutually_exclusive_group()
+    strength.add_argument("--elo", type=int, metavar="N",
+                          help=f"strength, {Strength.ELO_MIN}-{Strength.ELO_MAX}")
+    strength.add_argument("--skill", type=int, metavar="N",
+                          help=f"skill level, {Strength.SKILL_MIN}-{Strength.SKILL_MAX} "
+                               f"-- the only way below {Strength.ELO_MIN} Elo")
+    local.add_argument("--depth", type=int, default=12, metavar="N",
+                       help="search depth (default 12)")
+    local.add_argument("--movetime", type=int, metavar="MS",
+                       help="milliseconds per move, instead of a depth limit")
+    local.add_argument("--threads", type=int, default=1, metavar="N",
+                       help="engine threads (default 1)")
+
+    online = p.add_argument_group("lichess (--mode online-*, needs a board:play token)")
+    online.add_argument("--ai-level", type=_ai_level, metavar="LEVEL",
+                        help="Lichess AI level, 1-8")
+    online.add_argument("--game", metavar="ID", dest="game_id",
+                        help="join a specific game already in progress")
+    online.add_argument("--color", choices=("white", "black", "random"),
+                        default="white", help="your colour when challenging the AI")
+    online.add_argument("--token-file", metavar="PATH",
+                        help="where to read the token (default ~/.lichess-token)")
+
+    short = p.add_argument_group("shorthand")
+    short.add_argument("--lichess", action="store_true",
+                       help=f"same as --mode {ONLINE_HUMAN}")
+    short.add_argument("--lichess-ai", type=_ai_level, metavar="LEVEL",
+                       help=f"same as --mode {ONLINE_AI} --ai-level LEVEL")
     return p
+
+
+def resolve_mode(args) -> Tuple[Optional[str], Optional[str]]:
+    """Work out the mode from an explicit flag or the options given.
+
+    Returns (mode, error). Inference is a convenience; anything ambiguous is an
+    error rather than a guess, because silently playing the wrong opponent is a
+    worse outcome than being told to be explicit.
+    """
+    implied = []
+    if args.lichess:
+        implied.append(ONLINE_HUMAN)
+    if args.lichess_ai is not None or args.ai_level is not None or args.game_id:
+        implied.append(ONLINE_AI if not args.game_id else ONLINE_HUMAN)
+    if args.elo is not None or args.skill is not None:
+        implied.append(LOCAL_AI)
+
+    distinct = set(implied)
+    if args.mode:
+        conflicting = distinct - {args.mode}
+        # --game is fine with either online mode.
+        if conflicting and not (args.mode.startswith("online")
+                                and conflicting <= {ONLINE_HUMAN, ONLINE_AI}):
+            return None, (f"--mode {args.mode} conflicts with the other options "
+                          f"given ({', '.join(sorted(conflicting))})")
+        return args.mode, None
+
+    if len(distinct) > 1:
+        return None, ("those options imply more than one mode "
+                      f"({', '.join(sorted(distinct))}) -- pass --mode explicitly")
+    if distinct:
+        return implied[0], None
+    return LOCAL_HUMAN, None
 
 
 def main(argv: Optional[list] = None) -> int:
     args = build_parser().parse_args(argv)
-    versus_engine = args.engine or args.black or args.elo is not None or args.skill is not None
+    if args.lichess_ai is not None and args.ai_level is None:
+        args.ai_level = args.lichess_ai
+
+    mode, error = resolve_mode(args)
+    if error:
+        print(error, file=sys.stderr)
+        return 2
 
     try:
         game = Game(args.fen)
@@ -83,21 +155,29 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     leds = ConsoleLEDDriver()
+    if mode == LOCAL_HUMAN:
+        return _local_human(game, leds)
+    if mode == LOCAL_AI:
+        return _local_ai(args, game, leds)
+    return _online(args, leds, vs_ai=(mode == ONLINE_AI))
+
+
+# ---- local ----------------------------------------------------------------
+
+def _local_human(game: Game, leds: ConsoleLEDDriver) -> int:
     keyboard = KeyboardInput()
+    session = Session(game, keyboard, leds)
+    keyboard._on_command = session.handle_command
+    print("Two players, one keyboard. SAN or UCI; "
+          "'moves', 'takeback', 'fen', 'quit'.")
+    try:
+        session.run()
+    finally:
+        session.close()
+    return 0
 
-    if args.lichess or args.lichess_ai is not None or args.lichess_game:
-        return _play_lichess(args, leds)
 
-    if not versus_engine:
-        session = Session(game, keyboard, leds)
-        keyboard._on_command = session.handle_command
-        print("Local two-player. SAN or UCI; 'moves', 'takeback', 'fen', 'quit'.")
-        try:
-            session.run()
-        finally:
-            session.close()
-        return 0
-
+def _local_ai(args, game: Game, leds: ConsoleLEDDriver) -> int:
     try:
         strength = Strength(elo=args.elo, skill=args.skill, threads=args.threads)
     except ValueError as exc:
@@ -106,20 +186,22 @@ def main(argv: Optional[list] = None) -> int:
 
     limit = (chess.engine.Limit(time=args.movetime / 1000.0) if args.movetime
              else chess.engine.Limit(depth=args.depth))
-
     try:
-        engine = Engine(strength=strength, limit=limit)
+        engine = open_engine(args.engine, strength=strength, limit=limit)
     except EngineUnavailable as exc:
         print(f"{exc}", file=sys.stderr)
         return 1
 
+    keyboard = KeyboardInput()
     you = chess.BLACK if args.black else chess.WHITE
-    engine_input = EngineInput(engine, announce=print, name=engine.name)
-    session = Session(game, {you: keyboard, not you: engine_input}, leds)
+    session = Session(
+        game,
+        {you: keyboard, not you: EngineInput(engine, announce=print, name=engine.name)},
+        leds,
+    )
     keyboard._on_command = session.handle_command
-
-    print(f"You are {'Black' if args.black else 'White'} against {engine.name} "
-          f"({strength.describe()}, {_limit_text(limit)}).")
+    print(f"You are {'Black' if args.black else 'White'} against "
+          f"{engine.describe()}, {_limit_text(limit)}.")
     print("SAN or UCI; 'moves', 'takeback', 'fen', 'quit'.")
     try:
         session.run()
@@ -128,7 +210,9 @@ def main(argv: Optional[list] = None) -> int:
     return 0
 
 
-def _play_lichess(args, leds: ConsoleLEDDriver) -> int:
+# ---- online ---------------------------------------------------------------
+
+def _online(args, leds: ConsoleLEDDriver, vs_ai: bool) -> int:
     try:
         client = Client(load_token(args.token_file))
         me = client.username()
@@ -138,12 +222,13 @@ def _play_lichess(args, leds: ConsoleLEDDriver) -> int:
     print(f"Signed in as {me}.")
 
     try:
-        if args.lichess_game:
-            game_id = args.lichess_game
-        elif args.lichess_ai is not None:
-            created = client.challenge_ai(args.lichess_ai, color=args.lichess_color)
+        if args.game_id:
+            game_id = args.game_id
+        elif vs_ai:
+            level = args.ai_level if args.ai_level is not None else 1
+            created = client.challenge_ai(level, color=args.color)
             game_id = created.get("id")
-            print(f"  challenged the Lichess AI at level {args.lichess_ai}")
+            print(f"  challenged the Lichess AI at level {level}")
         else:
             game_id = wait_for_game(client)
     except (LichessError, ValueError) as exc:
@@ -157,9 +242,8 @@ def _play_lichess(args, leds: ConsoleLEDDriver) -> int:
     print(f"  watch at https://lichess.org/{game_id}")
     print("SAN or UCI; 'moves', 'fen', 'board', 'resign', 'quit'.")
     print("Moves you play in a browser appear here too — no takeback online.")
-    game = LichessGame(client, game_id, leds, me)
     try:
-        game.run()
+        LichessGame(client, game_id, leds, me).run()
     except LichessError as exc:
         print(f"\nlost the game stream: {exc}", file=sys.stderr)
         return 1

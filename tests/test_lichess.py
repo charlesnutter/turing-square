@@ -246,11 +246,13 @@ def interleaved(game, pairs):
     return game.run(bus=bus)
 
 
-def game_full(white="me", black="them", moves="", status="started"):
+def game_full(white="me", black="them", moves="", status="started",
+              initial_fen="startpos"):
     return {
         "type": "gameFull",
         "white": {"id": white},
         "black": {"id": black},
+        "initialFen": initial_fen,
         "state": {"type": "gameState", "moves": moves, "status": status},
     }
 
@@ -407,3 +409,84 @@ def test_unreadable_input_does_not_end_the_game():
         ("lichess", {"type": "gameState", "moves": "e2e4", "status": "aborted"}),
     ])
     assert client.moves == ["e2e4"]
+
+
+# --------------------------------------------------------------------------
+# special moves over the wire
+#
+# These arrive as plain UCI and go through the same rebuild path as everything
+# else, so the risk is that python-chess reads them differently from how Lichess
+# meant them. Castling in particular: Lichess sends `e1g1`, which is a two-square
+# king move, not the Chess960 `e1h1` rook-capture spelling.
+# --------------------------------------------------------------------------
+
+SPECIALS = [
+    ("kingside castling", "startpos",
+     "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 e1g1", "O-O"),
+    ("queenside castling", "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1",
+     "e1c1", "O-O-O"),
+    ("en passant", "startpos",
+     "e2e4 a7a6 e4e5 d7d5 e5d6", "exd6"),
+    ("promotion to queen", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+     "a7a8q", "a8=Q+"),
+    ("underpromotion to knight", "4k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+     "a7a8n", "a8=N"),
+]
+
+
+@pytest.mark.parametrize("label,fen,moves,last_san",
+                         SPECIALS, ids=[s[0] for s in SPECIALS])
+def test_special_moves_survive_the_rebuild(label, fen, moves, last_san):
+    game = driver(FakeClient())
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them",
+                              moves=moves, initial_fen=fen)),
+        ("lichess", {"type": "gameState", "moves": moves, "status": "draw"}),
+    ])
+    assert game.game.san_history[-1] == last_san
+
+
+def test_castling_actually_moves_the_rook():
+    """O-O is two pieces. A king-only interpretation would pass a SAN check."""
+    moves = "e2e4 e7e5 g1f3 b8c6 f1c4 f8c5 e1g1"
+    game = driver(FakeClient())
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves=moves)),
+        ("lichess", {"type": "gameState", "moves": moves, "status": "draw"}),
+    ])
+    board = game.game.board
+    assert board.piece_at(chess.G1) == chess.Piece(chess.KING, chess.WHITE)
+    assert board.piece_at(chess.F1) == chess.Piece(chess.ROOK, chess.WHITE)
+    assert board.piece_at(chess.H1) is None
+
+
+def test_en_passant_removes_the_pawn_that_is_not_on_the_destination():
+    moves = "e2e4 a7a6 e4e5 d7d5 e5d6"
+    game = driver(FakeClient())
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves=moves)),
+        ("lichess", {"type": "gameState", "moves": moves, "status": "draw"}),
+    ])
+    board = game.game.board
+    assert board.piece_at(chess.D6) == chess.Piece(chess.PAWN, chess.WHITE)
+    assert board.piece_at(chess.D5) is None
+
+
+@pytest.mark.parametrize("status,winner,expect", [
+    ("mate", "white", "you won"),
+    ("stalemate", None, "game over: stalemate"),
+    ("outoftime", "black", "you lost"),
+    ("draw", None, "game over: draw"),
+    ("aborted", None, "game over: aborted"),
+])
+def test_every_terminal_status_ends_the_game(status, winner, expect):
+    """Resign was verified live; these take the identical branch."""
+    state = {"type": "gameState", "moves": "e2e4", "status": status}
+    if winner:
+        state["winner"] = winner
+    game = driver(FakeClient())
+    result = interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves="e2e4")),
+        ("lichess", state),
+    ])
+    assert expect in result
