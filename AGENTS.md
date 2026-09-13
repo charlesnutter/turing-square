@@ -307,6 +307,12 @@ entries short and concrete: what was assumed, what was true, what to do instead.
   to 1320 that hands a novice a club player. Probe `engine.options` rather than
   trusting a range — it is build-dependent.
 
+- **Lichess's `gameFull` carries a `state` of its own.** It is not just metadata
+  announcing the game — it embeds a full `gameState`, and if it is your move when
+  you connect, you must act on it. Treating `gameFull` as setup-only leaves the
+  driver waiting forever for a `gameState` that already arrived. Always feed its
+  `state` through the same handler.
+
 - **Check where a tool writes before relying on it.** `npx skills add` installs to
   the agent's own directory — `.claude/skills/` for Claude Code — which is
   gitignored here. It would report success, work locally, and silently never
