@@ -22,6 +22,11 @@ than quietly switching.
 - **Hardware lives behind two interfaces.** `LEDDriver` and `BoardInput`. The
   game core must never learn whether a move came from a keyboard or a magnet.
   Adding hardware changes one line of wiring-up code, never the core.
+- **Inputs are producers on one queue, never blocking calls.** `chessboard/events.py`
+  fans each source into a shared queue and the main loop dispatches. Blocking on
+  a single source is what made browser-played moves invisible online, and it is
+  the same failure Phase 2 would hit with a physical board, a tablet and an
+  engine all producing moves at once. Add a producer; do not add a blocking read.
 - **Move detection matches, it does not diff.** Generate the occupancy pattern
   every legal move would produce and match against that list. A raw diff cannot
   resolve captures, castling or en passant.
@@ -312,6 +317,11 @@ entries short and concrete: what was assumed, what was true, what to do instead.
   you connect, you must act on it. Treating `gameFull` as setup-only leaves the
   driver waiting forever for a `gameState` that already arrived. Always feed its
   `state` through the same handler.
+
+- **SAN is parsed relative to the side to move.** Typing your own move during
+  the opponent's turn does not fail as "not your turn" — it fails as *"not legal
+  in this position"*, because `parse_san` read it as a move for them. Check whose
+  turn it is **before** parsing, or the error blames the wrong thing entirely.
 
 - **Check where a tool writes before relying on it.** `npx skills add` installs to
   the agent's own directory — `.claude/skills/` for Claude Code — which is

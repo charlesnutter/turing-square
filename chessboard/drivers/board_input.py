@@ -24,6 +24,30 @@ class Quit(Exception):
     """The player asked to stop."""
 
 
+def parse_move(board: chess.Board, text: str,
+               echo: Callable[[str], None] = lambda _: None) -> Optional[chess.Move]:
+    """SAN or UCI to a Move, or None with an explanation echoed.
+
+    UCI is matched first: python-chess's SAN parser also accepts UCI-shaped text
+    and then raises before a Move object exists, which would stop an illegal move
+    ever reaching the core's explainer.
+    """
+    text = text.strip()
+    if not text:
+        return None
+    if UCI.match(text):
+        return chess.Move.from_uci(text.lower())
+    try:
+        return board.parse_san(text)
+    except chess.AmbiguousMoveError:
+        echo(f"  ?  {text} is ambiguous -- name the file or rank, as in Nbd2")
+    except chess.IllegalMoveError:
+        echo(f"  ?  {text} is not legal in this position")
+    except chess.InvalidMoveError:
+        echo(f"  ?  {text!r} is not a move I can read")
+    return None
+
+
 class BoardInput(ABC):
     @abstractmethod
     def next_move(self, board: chess.Board) -> Optional[chess.Move]:
@@ -65,29 +89,7 @@ class KeyboardInput(BoardInput):
                 self._on_command(text.lower())
             return None
 
-        if UCI.match(text):
-            # Straight through to the core, legal or not.
-            return chess.Move.from_uci(text.lower())
-
-        try:
-            return board.parse_san(text)
-        except chess.AmbiguousMoveError:
-            self._echo(f"  ?  {text} is ambiguous -- name the file or rank, as in Nbd2")
-            return None
-        except chess.IllegalMoveError:
-            # Readable, but not allowed here. SAN cannot be turned into a move
-            # object unless it is legal, so this is as far as we can take it.
-            self._echo(f"  ?  {text} is not legal in this position")
-            return None
-        except chess.InvalidMoveError:
-            pass
-
-        # UCI reaches the core even when illegal, so the core can say why.
-        try:
-            return chess.Move.from_uci(text.lower())
-        except ValueError:
-            self._echo(f"  ?  {text!r} is not a move I can read")
-            return None
+        return parse_move(board, text, self._echo)
 
 
 class EngineInput(BoardInput):

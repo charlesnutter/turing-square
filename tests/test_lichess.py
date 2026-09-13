@@ -12,8 +12,8 @@ import urllib.error
 import chess
 import pytest
 
-from chessboard.drivers.board_input import BoardInput, Quit
 from chessboard.drivers.led import ConsoleLEDDriver
+from chessboard.events import EOF, EventBus
 from chessboard.lichess.client import (
     AuthError, Client, LichessError, RateLimited, load_token,
 )
@@ -206,9 +206,10 @@ def test_no_bot_endpoints_are_ever_called():
 # --------------------------------------------------------------------------
 
 class FakeClient:
-    def __init__(self, events):
-        self._events = events
+    def __init__(self, events=()):
+        self._events = list(events)
         self.moves = []
+        self.resigned = False
 
     def stream_game(self, game_id):
         return iter(self._events)
@@ -217,16 +218,32 @@ class FakeClient:
         self.moves.append(uci)
         return {"ok": True}
 
+    def resign(self, game_id):
+        self.resigned = True
+        return {"ok": True}
 
-class Scripted(BoardInput):
-    def __init__(self, ucis):
-        self._it = iter(ucis)
 
-    def next_move(self, board):
-        try:
-            return chess.Move.from_uci(next(self._it))
-        except StopIteration:
-            raise Quit from None
+def driver(client, typed=(), me="me"):
+    return LichessGame(client, "abc", QUIET, me, lines=list(typed), echo=silent)
+
+
+def play(client, events, typed=()):
+    """Run one game with a deterministic event order, no threads."""
+    game = driver(client, typed)
+    bus = EventBus()
+    for item in events:
+        bus.post("lichess", item)
+    bus.post("stdin", None, EOF)
+    return game, game.run(bus=bus)
+
+
+def interleaved(game, pairs):
+    """Feed (source, payload) pairs in an exact order."""
+    bus = EventBus()
+    for source, payload in pairs:
+        bus.post(source, payload)
+    bus.post("stdin", None, EOF)
+    return game.run(bus=bus)
 
 
 def game_full(white="me", black="them", moves="", status="started"):
@@ -239,89 +256,154 @@ def game_full(white="me", black="them", moves="", status="started"):
 
 
 def test_adopts_colour_from_the_game_full_event():
-    events = [game_full(white="me", black="them"),
-              {"type": "gameState", "moves": "e2e4 e7e5", "status": "mate",
-               "winner": "white"}]
-    client = FakeClient(events)
-    g = LichessGame(client, "abc", Scripted(["e2e4"]), QUIET, "me", echo=silent)
-    g.run()
-    assert g.my_color == chess.WHITE
+    client = FakeClient()
+    game = driver(client)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves="e2e4")),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5", "status": "draw"}),
+    ])
+    assert game.my_color == chess.WHITE
 
 
 def test_board_is_rebuilt_from_the_stream_not_applied_locally():
     """The move list is authoritative, so our own move is never double-applied."""
-    events = [
-        game_full(white="me", black="them"),
-        {"type": "gameState", "moves": "e2e4 e7e5", "status": "started"},
-        {"type": "gameState", "moves": "e2e4 e7e5 g1f3 b8c6", "status": "draw"},
-    ]
-    client = FakeClient(events)
-    g = LichessGame(client, "abc", Scripted(["e2e4", "g1f3"]), QUIET, "me", echo=silent)
-    g.run()
-    assert g.game.san_history == ["e4", "e5", "Nf3", "Nc6"]
-    assert g.game.ply == 4
+    client = FakeClient()
+    game = driver(client, typed=[])
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("stdin", "e4"),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5", "status": "started"}),
+        ("stdin", "Nf3"),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5 g1f3 b8c6",
+                     "status": "draw"}),
+    ])
+    assert game.game.san_history == ["e4", "e5", "Nf3", "Nc6"]
+    assert client.moves == ["e2e4", "g1f3"]
+    assert game.game.ply == 4
 
 
-def test_our_move_is_posted_only_on_our_turn():
-    events = [
-        game_full(white="me", black="them"),
-        {"type": "gameState", "moves": "e2e4 e7e5", "status": "started"},
-        {"type": "gameState", "moves": "e2e4 e7e5 g1f3", "status": "resign",
-         "winner": "white"},
-    ]
-    client = FakeClient(events)
-    g = LichessGame(client, "abc", Scripted(["e2e4", "g1f3"]), QUIET, "me", echo=silent)
-    g.run()
-    assert client.moves == ["e2e4", "g1f3"]   # not on Black's turns
+def test_a_move_played_in_a_browser_reaches_the_terminal():
+    """The point of the queue: nothing is typed, yet the board keeps advancing.
+
+    Previously the loop blocked on input while it was our turn, so a move made
+    elsewhere arrived at a socket nobody was reading.
+    """
+    client = FakeClient()
+    game = driver(client)
+    result = interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),          # our move
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5",    # played in a browser
+                     "status": "started"}),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5 g1f3 b8c6",
+                     "status": "resign", "winner": "white"}),
+    ])
+    assert game.game.san_history == ["e4", "e5", "Nf3", "Nc6"]
+    assert client.moves == []            # we never typed, so we never posted
+    assert "you won" in result
+
+
+def test_typing_out_of_turn_is_refused_without_posting():
+    client = FakeClient()
+    seen = []
+    game = LichessGame(client, "abc", QUIET, "me", lines=[], echo=seen.append)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves="e2e4")),  # their move
+        ("stdin", "d4"),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5", "status": "draw"}),
+    ])
+    assert client.moves == []
+    assert any("not your move" in line for line in seen)
 
 
 def test_playing_black_waits_before_moving():
-    events = [
-        game_full(white="them", black="me"),
-        {"type": "gameState", "moves": "e2e4", "status": "started"},
-        {"type": "gameState", "moves": "e2e4 e7e5", "status": "stalemate"},
-    ]
-    client = FakeClient(events)
-    g = LichessGame(client, "abc", Scripted(["e7e5"]), QUIET, "me", echo=silent)
-    g.run()
-    assert g.my_color == chess.BLACK
+    client = FakeClient()
+    game = driver(client)
+    interleaved(game, [
+        ("lichess", game_full(white="them", black="me")),
+        ("lichess", {"type": "gameState", "moves": "e2e4", "status": "started"}),
+        ("stdin", "e5"),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5", "status": "stalemate"}),
+    ])
+    assert game.my_color == chess.BLACK
     assert client.moves == ["e7e5"]
 
 
 def test_result_reports_which_side_you_were():
-    # Opening state is Black to move, so the driver waits rather than prompting.
-    events = [game_full(white="me", black="them", moves="e2e4"),
-              {"type": "gameState", "moves": "e2e4 e7e5", "status": "mate",
-               "winner": "black"}]
-    g = LichessGame(FakeClient(events), "abc", Scripted([]), QUIET, "me", echo=silent)
-    assert "you lost" in g.run()
-
-
-def test_quitting_mid_game_aborts_cleanly():
-    """Ctrl-D at the prompt must stop, not crash or post a move."""
-    events = [game_full(white="me", black="them"),
-              {"type": "gameState", "moves": "e2e4", "status": "started"}]
-    client = FakeClient(events)
-    g = LichessGame(client, "abc", Scripted([]), QUIET, "me", echo=silent)
-    assert g.run() == "aborted"
-    assert client.moves == []
+    game = driver(FakeClient())
+    result = interleaved(game, [
+        ("lichess", game_full(white="me", black="them", moves="e2e4")),
+        ("lichess", {"type": "gameState", "moves": "e2e4 e7e5", "status": "mate",
+                     "winner": "black"}),
+    ])
+    assert "you lost" in result
 
 
 def test_refuses_a_game_we_are_not_playing_in():
-    events = [game_full(white="someone", black="other")]
-    g = LichessGame(FakeClient(events), "abc", Scripted([]), QUIET, "me", echo=silent)
+    game = driver(FakeClient())
     with pytest.raises(LichessError, match="not a player"):
-        g.run()
+        interleaved(game, [("lichess", game_full(white="someone", black="other"))])
 
 
 def test_chat_lines_do_not_disturb_the_game():
     seen = []
-    events = [
-        game_full(white="me", black="them"),
-        {"type": "chatLine", "username": "them", "text": "hi"},
-        {"type": "gameState", "moves": "e2e4", "status": "aborted"},
-    ]
-    g = LichessGame(FakeClient(events), "abc", Scripted(["e2e4"]), QUIET, "me",
-                    echo=seen.append)
-    g.run()
+    game = LichessGame(FakeClient(), "abc", QUIET, "me", lines=[], echo=seen.append)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("lichess", {"type": "chatLine", "username": "them", "text": "hi"}),
+        ("lichess", {"type": "gameState", "moves": "e2e4", "status": "aborted"}),
+    ])
     assert any("hi" in line for line in seen)
+
+
+# --------------------------------------------------------------------------
+# commands -- advertised in the help, and previously not wired at all
+# --------------------------------------------------------------------------
+
+def test_moves_and_fen_commands_produce_output():
+    seen = []
+    game = LichessGame(FakeClient(), "abc", QUIET, "me", lines=[], echo=seen.append)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("stdin", "moves"),
+        ("stdin", "fen"),
+        ("lichess", {"type": "gameState", "moves": "", "status": "aborted"}),
+    ])
+    text = "\n".join(seen)
+    assert "Nf3" in text                       # legal move list
+    assert "rnbqkbnr" in text                  # fen
+
+
+def test_resign_command_reaches_lichess():
+    client = FakeClient()
+    game = driver(client)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("stdin", "resign"),
+        ("lichess", {"type": "gameState", "moves": "", "status": "resign",
+                     "winner": "black"}),
+    ])
+    assert client.resigned is True
+
+
+def test_quit_leaves_the_game_running():
+    client = FakeClient()
+    game = driver(client)
+    result = interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("stdin", "quit"),
+    ])
+    assert result == "aborted"
+    assert client.resigned is False
+    assert client.moves == []
+
+
+def test_unreadable_input_does_not_end_the_game():
+    client = FakeClient()
+    game = driver(client)
+    interleaved(game, [
+        ("lichess", game_full(white="me", black="them")),
+        ("stdin", "zzz"),
+        ("stdin", "e4"),
+        ("lichess", {"type": "gameState", "moves": "e2e4", "status": "aborted"}),
+    ])
+    assert client.moves == ["e2e4"]

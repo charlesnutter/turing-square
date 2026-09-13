@@ -86,7 +86,7 @@ def main(argv: Optional[list] = None) -> int:
     keyboard = KeyboardInput()
 
     if args.lichess or args.lichess_ai is not None or args.lichess_game:
-        return _play_lichess(args, keyboard, leds)
+        return _play_lichess(args, leds)
 
     if not versus_engine:
         session = Session(game, keyboard, leds)
@@ -128,7 +128,7 @@ def main(argv: Optional[list] = None) -> int:
     return 0
 
 
-def _play_lichess(args, keyboard: KeyboardInput, leds: ConsoleLEDDriver) -> int:
+def _play_lichess(args, leds: ConsoleLEDDriver) -> int:
     try:
         client = Client(load_token(args.token_file))
         me = client.username()
@@ -155,15 +155,14 @@ def _play_lichess(args, keyboard: KeyboardInput, leds: ConsoleLEDDriver) -> int:
         return 1
 
     print(f"  watch at https://lichess.org/{game_id}")
-    print("SAN or UCI; 'moves', 'fen', 'quit'. Takeback is not offered online.")
-    game = LichessGame(client, game_id, keyboard, leds, me)
+    print("SAN or UCI; 'moves', 'fen', 'board', 'resign', 'quit'.")
+    print("Moves you play in a browser appear here too — no takeback online.")
+    game = LichessGame(client, game_id, leds, me)
     try:
         game.run()
     except LichessError as exc:
         print(f"\nlost the game stream: {exc}", file=sys.stderr)
         return 1
-    finally:
-        keyboard.close()
     return 0
 
 
