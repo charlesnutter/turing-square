@@ -299,6 +299,14 @@ entries short and concrete: what was assumed, what was true, what to do instead.
   exists — so illegal UCI never reached the core's explainer and players got a
   generic error. Match UCI with a regex first, and let the core explain.
 
+- **`UCI_Elo` bottoms out at 1320, and `Skill Level` is a different mechanism.**
+  The plan said "configurable strength via `UCI_LimitStrength` and `Skill Level`"
+  as though they were one dial. They are not: Stockfish 19 accepts `UCI_Elo`
+  1320-3190 only, so a beginner opponent has to go through `Skill Level` (0-20).
+  Asking for Elo 800 must be an error that names the floor, never a silent clamp
+  to 1320 that hands a novice a club player. Probe `engine.options` rather than
+  trusting a range — it is build-dependent.
+
 - **Check where a tool writes before relying on it.** `npx skills add` installs to
   the agent's own directory — `.claude/skills/` for Claude Code — which is
   gitignored here. It would report success, work locally, and silently never
