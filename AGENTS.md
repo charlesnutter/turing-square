@@ -22,6 +22,14 @@ than quietly switching.
 - **Hardware lives behind two interfaces.** `LEDDriver` and `BoardInput`. The
   game core must never learn whether a move came from a keyboard or a magnet.
   Adding hardware changes one line of wiring-up code, never the core.
+- **Adding an engine must not add a play mode.** `ChessEngine` is the interface;
+  `StockfishEngine` is one implementation. Maia has no `UCI_Elo` or `Skill Level`
+  at all — you pick a net — so strength configuration belongs to the
+  implementation. The right shape is `--mode local-ai --engine maia`, never a
+  separate "play Maia" mode.
+- **Four modes, two implementations.** `local-human`/`local-ai` differ only in
+  which producer supplies the opponent's moves; `online-human`/`online-ai` differ
+  only in how the game is created. The UI count must not drive the code count.
 - **Inputs are producers on one queue, never blocking calls.** `chessboard/events.py`
   fans each source into a shared queue and the main loop dispatches. Blocking on
   a single source is what made browser-played moves invisible online, and it is
@@ -317,6 +325,13 @@ entries short and concrete: what was assumed, what was true, what to do instead.
   you connect, you must act on it. Treating `gameFull` as setup-only leaves the
   driver waiting forever for a `gameState` that already arrived. Always feed its
   `state` through the same handler.
+
+- **A Lichess online mode creates a real game the moment it runs.** Running the
+  online modes as a smoke test with a valid token in place posted a challenge and
+  started an actual game on the account. Zero-move games abort cleanly with no
+  rating effect, but **test the online path with `--help`, `resolve_mode`, or a
+  bad token** — never by running it and piping the output somewhere. `--game ID`
+  joins without creating anything.
 
 - **SAN is parsed relative to the side to move.** Typing your own move during
   the opponent's turn does not fail as "not your turn" — it fails as *"not legal

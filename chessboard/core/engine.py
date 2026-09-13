@@ -1,14 +1,22 @@
-"""Stockfish, wrapped.
+"""Local engines.
 
-The engine answers "what would you play?" and "how good is this?". It is never
-asked whether a move is legal -- python-chess owns that, and the one time an
-engine is allowed to decide legality is never.
+An engine answers "what would you play?" and "how good is this?". It is never
+asked whether a move is legal -- python-chess owns that.
 
-The process is opened once and reused. Spawning Stockfish per move costs more
-than the search does at club strength.
+`ChessEngine` is the interface; `StockfishEngine` is the only implementation
+today. The abstraction exists because Stockfish at low skill plays *inhuman*
+moves -- strong ones interspersed with bizarre ones -- which is unsatisfying
+across a physical board. Maia (nine nets trained on human games, 1100-1900 Elo,
+run under lc0 with search disabled) is the planned fix, and it has no
+`UCI_Elo` or `Skill Level` at all: you pick a net. So strength configuration
+belongs to the implementation, not to the interface.
+
+Adding an engine must not add a play mode. `--mode local-ai --engine maia` is
+the shape; a separate "play Maia" mode is not.
 """
 
 import shutil
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 
@@ -79,12 +87,45 @@ class Strength:
 FULL_STRENGTH = Strength()
 
 
-class Engine:
+class ChessEngine(ABC):
+    """Anything that can choose a move.
+
+    `EngineInput` duck-types on `play`, so an engine need not inherit from this
+    to be usable -- but implementing it documents the contract and gets the
+    context-manager behaviour for free.
+    """
+
+    @property
+    def name(self) -> str:
+        return type(self).__name__
+
+    @abstractmethod
+    def play(self, board: chess.Board) -> chess.Move:
+        """The move this engine would make. Never consulted about legality."""
+
+    def analyse(self, board: chess.Board, multipv: int = 1, limit=None) -> list:
+        """Top lines with scores. Engines that cannot evaluate return nothing."""
+        return []
+
+    def describe(self) -> str:
+        return self.name
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> "ChessEngine":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
+class StockfishEngine(ChessEngine):
     """A running Stockfish process.
 
     Use as a context manager so the process is always reaped:
 
-        with Engine(strength=Strength(elo=1500)) as engine:
+        with StockfishEngine(strength=Strength(elo=1500)) as engine:
             move = engine.play(board)
     """
 
@@ -166,8 +207,19 @@ class Engine:
         except Exception:  # noqa: BLE001 -- closing must never raise
             pass
 
-    def __enter__(self) -> "Engine":
-        return self
+    def describe(self) -> str:
+        return f"{self.name} ({self.strength.describe()})"
 
-    def __exit__(self, *exc) -> None:
-        self.close()
+
+ENGINES = {"stockfish": StockfishEngine}
+
+
+def open_engine(kind: str = "stockfish", **kwargs) -> ChessEngine:
+    """Open a local engine by name. The registry is where Maia will land."""
+    try:
+        factory = ENGINES[kind]
+    except KeyError:
+        raise EngineUnavailable(
+            f"unknown engine {kind!r} -- known: {', '.join(sorted(ENGINES))}"
+        ) from None
+    return factory(**kwargs)

@@ -7,14 +7,16 @@ cannot tell one move source from another, which is the property that matters.
 import chess
 import pytest
 
-from chessboard.core.engine import Engine, Strength
+from chessboard.core.engine import (
+    ChessEngine, StockfishEngine, Strength, open_engine,
+)
 from chessboard.core.game import Game
 from chessboard.drivers.board_input import BoardInput, EngineInput
 from chessboard.drivers.led import ConsoleLEDDriver
 from chessboard.session import Session
 
 needs_stockfish = pytest.mark.skipif(
-    not Engine.available(), reason="stockfish not on PATH"
+    not StockfishEngine.available(), reason="stockfish not on PATH"
 )
 
 
@@ -119,7 +121,7 @@ def test_single_input_still_serves_both_sides():
 
 @needs_stockfish
 def test_engine_plays_a_legal_move_at_low_skill():
-    with Engine(strength=Strength(skill=0)) as engine:
+    with StockfishEngine(strength=Strength(skill=0)) as engine:
         board = chess.Board()
         assert engine.play(board) in board.legal_moves
 
@@ -128,14 +130,63 @@ def test_engine_plays_a_legal_move_at_low_skill():
 def test_engine_refuses_to_move_in_a_finished_game():
     board = chess.Board("7k/5QQ1/8/8/8/8/8/7K b - - 0 1")
     assert board.is_game_over()
-    with Engine(strength=Strength(skill=0)) as engine:
+    with StockfishEngine(strength=Strength(skill=0)) as engine:
         with pytest.raises(ValueError, match="finished game"):
             engine.play(board)
 
 
 @needs_stockfish
 def test_analyse_returns_multipv_lines_with_scores():
-    with Engine(strength=Strength(skill=5)) as engine:
+    with StockfishEngine(strength=Strength(skill=5)) as engine:
         info = engine.analyse(chess.Board(), multipv=3)
         assert len(info) == 3
         assert all("score" in line for line in info)
+
+
+# --------------------------------------------------------------------------
+# the engine interface -- so adding Maia adds an engine, not a play mode
+# --------------------------------------------------------------------------
+
+class ToyEngine(ChessEngine):
+    """A second implementation, to prove nothing is Stockfish-shaped."""
+
+    @property
+    def name(self):
+        return "toy"
+
+    def play(self, board):
+        return sorted(board.legal_moves, key=lambda m: m.uci())[0]
+
+
+def test_a_non_stockfish_engine_satisfies_the_interface():
+    with ToyEngine() as engine:
+        board = chess.Board()
+        assert engine.play(board) in board.legal_moves
+        assert engine.describe() == "toy"
+        assert engine.analyse(board) == []      # cannot evaluate, says so
+
+
+def test_an_engine_without_strength_knobs_still_drives_a_session():
+    """Maia has no UCI_Elo or Skill Level -- you pick a net. That must be fine."""
+    game = Game()
+    session = Session(
+        game,
+        {chess.WHITE: ScriptedInput(["e2e4"]), chess.BLACK: EngineInput(ToyEngine())},
+        ConsoleLEDDriver(echo=lambda _: None),
+        echo=lambda _: None,
+    )
+    for _ in range(2):
+        game.play(session.input_for(game.turn).next_move(game.board))
+    assert game.ply == 2
+
+
+def test_unknown_engine_names_the_known_ones():
+    from chessboard.core.engine import EngineUnavailable
+    with pytest.raises(EngineUnavailable, match="stockfish"):
+        open_engine("maia")
+
+
+@needs_stockfish
+def test_open_engine_returns_a_chess_engine():
+    with open_engine("stockfish", strength=Strength(skill=1)) as engine:
+        assert isinstance(engine, ChessEngine)
