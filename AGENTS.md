@@ -81,8 +81,9 @@ coach's fact layer.
 - Runtime deps are `chess`, `pyserial`, `fastapi`, `uvicorn` and `websockets` —
   that is the whole list, and it is meant to stay short. `websockets` is
   uvicorn's WebSocket transport; FastAPI does not pull it in, and without it the
-  state push silently fails to serve. Tests additionally need `httpx`, which
-  `fastapi.testclient` refuses to import without.
+  state push silently fails to serve. Tests additionally need `httpx2`, which is
+  what Starlette's `TestClient` now wants -- plain `httpx` still works but is
+  deprecated, and warns on every import.
 - **Stockfish** from Homebrew, driven through `chess.engine`.
 - Firmware is Arduino C++ with FastLED, on an ATmega328P Nano.
 - Web UI is plain HTML and JS served by the Pi. No framework until something
