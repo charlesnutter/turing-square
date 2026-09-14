@@ -1,0 +1,20 @@
+Turing Square
+Copyright 2026 Charles Nutter
+
+This product includes software developed as part of the Turing Square project,
+licensed under the Apache License, Version 2.0. See LICENSE.
+
+------------------------------------------------------------------------------
+Third-party assets
+------------------------------------------------------------------------------
+
+chessboard/web/pieces/*.svg
+
+  Chess piece graphics by Colin M.L. Burnett ("Cburnett"), from the SVG chess
+  pieces set on Wikimedia Commons. Redistributed unmodified.
+
+  Licensed under the Creative Commons Attribution-ShareAlike 3.0 Unported
+  licence (CC BY-SA 3.0): https://creativecommons.org/licenses/by-sa/3.0/
+
+  Share-alike applies to these images and to derivatives of them. It does not
+  extend to the surrounding source code, which remains Apache-2.0.

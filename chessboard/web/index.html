@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Turing Square</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="bar">
+    <span class="dot" id="conn" role="status" aria-label="connection"></span>
+    <h1 id="title">Turing Square <span class="sub" id="subtitle"></span></h1>
+    <button class="icon" id="flip" title="Flip the board" aria-label="Flip the board">⇅</button>
+  </header>
+
+  <div class="boardwrap">
+    <div class="board" id="board" role="grid" aria-label="Chess board"></div>
+    <div class="veil" id="veil" aria-live="polite"><div class="stack">
+      <span id="veiltext"></span>
+      <button id="veilbtn" hidden></button>
+    </div></div>
+  </div>
+
+  <div class="side">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-pane="moves">Moves</button>
+      <button role="tab" aria-selected="false" data-pane="coach">Coach</button>
+      <button role="tab" aria-selected="false" data-pane="game">Game</button>
+    </div>
+
+    <section class="pane" id="pane-moves" role="tabpanel">
+      <div class="moves" id="movelist"></div>
+      <p class="empty" id="movesempty">No moves yet.</p>
+    </section>
+
+    <section class="pane" id="pane-coach" role="tabpanel" hidden>
+      <div class="banner">
+        <strong>The coach is not built yet.</strong>
+        <p class="hint">Suggesting a move and explaining one need the fact layer —
+        the classifier, the positional features and the narrator. Those are the
+        next items after this screen. Nothing here will guess in the meantime.</p>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button disabled title="Needs the offline suggest ladder">Suggest a move</button>
+        <button disabled title="Needs the facts builder and narrator">Explain this move</button>
+      </div>
+    </section>
+
+    <section class="pane" id="pane-game" role="tabpanel" hidden>
+      <div class="row">
+        <label for="mode" class="grow">Opponent</label>
+      </div>
+      <div class="row">
+        <select id="mode" class="grow">
+          <option value="local-human">Two players, one screen</option>
+          <option value="local-ai">A local engine</option>
+          <option value="online-human" disabled>A person on Lichess — terminal only</option>
+          <option value="online-ai" disabled>Lichess's engine — terminal only</option>
+        </select>
+      </div>
+
+      <div class="row" id="airow" hidden>
+        <label for="skill" class="grow">Engine skill <span id="skillval">1</span></label>
+        <input type="range" id="skill" min="0" max="20" value="1" class="grow">
+      </div>
+      <div class="row" id="siderow" hidden>
+        <label class="grow">You play</label>
+        <button id="side" data-black="false">White</button>
+      </div>
+
+      <div class="row">
+        <button class="primary grow" id="newgame">New game</button>
+      </div>
+      <div class="row">
+        <button id="undo" class="grow" disabled>Undo</button>
+        <button id="resign" class="grow" disabled title="Ends the local game">End game</button>
+      </div>
+      <p class="hint" id="gamehint"></p>
+    </section>
+  </div>
+</div>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheettitle">
+  <div class="card">
+    <h2 id="sheettitle">Promote to</h2>
+    <div class="picks" id="picks"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="grow" id="promocancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

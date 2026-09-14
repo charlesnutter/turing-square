@@ -239,3 +239,35 @@ def test_two_sockets_both_see_the_move(client):
         on_second = pushed_until(second, lambda s: sans(s) == ["d4"])
     assert any(sans(s) == ["d4"] for s in on_first), on_first
     assert any(sans(s) == ["d4"] for s in on_second), on_second
+
+
+# ---- the page itself ------------------------------------------------------
+
+def test_the_board_page_is_served_at_the_root(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "text/html" in page.headers["content-type"]
+
+
+def test_the_page_assets_are_served(client):
+    for path, kind in (("/app.js", "javascript"), ("/style.css", "css")):
+        asset = client.get(path)
+        assert asset.status_code == 200, path
+        assert kind in asset.headers["content-type"], path
+
+
+def test_the_piece_graphics_are_served():
+    """Twelve of them, and the licence says they ship unmodified."""
+    from fastapi.testclient import TestClient as TC
+    from chessboard.api.app import create_app as ca
+    with TC(ca(GameService(echo=lambda _: None))) as c:
+        for name in ("lk", "dk", "lq", "dq", "lr", "dr",
+                     "lb", "db", "ln", "dn", "lp", "dp"):
+            piece = c.get(f"/pieces/{name}.svg")
+            assert piece.status_code == 200, name
+            assert piece.text.lstrip().startswith("<?xml"), name
+
+
+def test_the_api_is_not_shadowed_by_the_static_files(client):
+    """The page is mounted at the root, so /api must still win."""
+    assert client.get("/api/state").json() == {"running": False}
