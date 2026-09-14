@@ -51,8 +51,17 @@ class Session:
         # None means "attach stdin when you run"; an explicit list, even an
         # empty one, means the caller is supplying the producers itself.
         self.inputs = None if inputs is None else list(inputs)
+        # Called after every event the loop handles, including one that changed
+        # nothing: a client may have drawn an optimistic board off a move that
+        # was then refused, and silence would leave it wrong.
+        self.on_change: Optional[Callable[[], None]] = None
         self._thinking_ply: Optional[int] = None
         self._result: Optional[str] = None
+
+    @property
+    def thinking(self) -> bool:
+        """Whether an engine has been asked and has not answered yet."""
+        return self._thinking_ply is not None
 
     # ---- display -----------------------------------------------------------
 
@@ -206,16 +215,22 @@ class Session:
                 if result is not None:
                     return self._finish(result)
                 self._ask_engine(bus)
+                self._changed()
         finally:
             if own_bus:
                 bus.stop()
             self.close()
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            self.on_change()
 
     def _finish(self, result: str) -> str:
         self._result = result
         self.echo(f"\n  {result}")
         if self.game.san_history:
             self.echo(f"  {self.game.movetext()}")
+        self._changed()
         return result
 
     def close(self) -> None:

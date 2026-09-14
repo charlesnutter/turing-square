@@ -105,3 +105,36 @@ def test_quitting_a_game_exits_cleanly():
         )
         assert "Fatal Python error" not in done.stderr, done.stderr
         assert done.returncode == 0, done.stderr
+
+
+# --------------------------------------------------------------------------
+# serving
+# --------------------------------------------------------------------------
+
+def test_serve_starts_the_api_rather_than_a_terminal_game():
+    served = {}
+
+    def fake_server(app, host, port):
+        served["host"], served["port"] = host, port
+        served["has_routes"] = any(
+            getattr(r, "path", None) == "/api/state" for r in app.routes)
+
+    from chessboard.cli import main
+    assert main(["--serve"], run_server=fake_server) == 0
+    assert served["has_routes"], "the app served was not the chessboard API"
+
+
+def test_serve_takes_a_host_and_port():
+    served = {}
+    from chessboard.cli import main
+    main(["--serve", "--host", "0.0.0.0", "--port", "9999"],
+         run_server=lambda app, host, port: served.update(host=host, port=port))
+    assert served == {"host": "0.0.0.0", "port": 9999}
+
+
+def test_serving_listens_on_localhost_by_default():
+    """The Pi is on a home network; binding every interface should be a choice."""
+    served = {}
+    from chessboard.cli import main
+    main(["--serve"], run_server=lambda app, host, port: served.update(host=host, port=port))
+    assert served["host"] == "127.0.0.1"
