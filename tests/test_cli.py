@@ -7,16 +7,18 @@ wrong opponent is worse than being told to be explicit.
 
 import pytest
 
-from chessboard.cli import (
-    LOCAL_AI, LOCAL_HUMAN, ONLINE_AI, ONLINE_HUMAN, build_parser, resolve_mode,
+from chessboard.cli import build_parser, request_from_args
+from chessboard.modes import (
+    LOCAL_AI, LOCAL_HUMAN, ONLINE_AI, ONLINE_HUMAN, resolve_mode,
 )
 
 
 def mode_for(*argv):
+    """Parse, adapt to a GameRequest, resolve -- the path `main` actually takes."""
     args = build_parser().parse_args(list(argv))
     if args.lichess_ai is not None and args.ai_level is None:
         args.ai_level = args.lichess_ai
-    return resolve_mode(args)
+    return resolve_mode(request_from_args(args))
 
 
 @pytest.mark.parametrize("argv,expected", [
@@ -78,3 +80,28 @@ def test_ai_level_is_rejected_at_parse_time(level):
 def test_elo_and_skill_cannot_both_be_given():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--elo", "1500", "--skill", "3"])
+
+
+# --------------------------------------------------------------------------
+# shutdown
+# --------------------------------------------------------------------------
+
+def test_quitting_a_game_exits_cleanly():
+    """The input producer is a daemon thread blocked on a read when the loop
+    ends. If it is also holding stdout's lock at that moment, CPython's
+    finalizer cannot flush and the process aborts *after* a clean `quit` --
+    which looks like a crash to anyone watching.
+
+    It is a race, so once proves nothing; a few runs do. Before the producer
+    stopped writing its own prompt this failed most times.
+    """
+    import subprocess
+    import sys
+
+    for _ in range(5):
+        done = subprocess.run(
+            [sys.executable, "-m", "chessboard"],
+            input="e4\ne5\nquit\n", capture_output=True, text=True, timeout=30,
+        )
+        assert "Fatal Python error" not in done.stderr, done.stderr
+        assert done.returncode == 0, done.stderr
