@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python -m chessboard --mode local-ai --skill 2 --black\n"
             "  python -m chessboard --mode online-ai --ai-level 1\n"
             "  python -m chessboard --mode online-human\n"
+            "  python -m chessboard --serve --host 0.0.0.0   play from a tablet\n"
         ),
     )
     p.add_argument("--mode", choices=MODES,
@@ -94,6 +95,15 @@ def build_parser() -> argparse.ArgumentParser:
     online.add_argument("--token-file", metavar="PATH",
                         help="where to read the token (default ~/.lichess-token)")
 
+    serve = p.add_argument_group("serve the API and the tablet UI")
+    serve.add_argument("--serve", action="store_true",
+                       help="run the HTTP server instead of playing in the terminal")
+    serve.add_argument("--host", default="127.0.0.1", metavar="ADDR",
+                       help="address to bind (default 127.0.0.1; use 0.0.0.0 "
+                            "to reach it from a tablet)")
+    serve.add_argument("--port", type=int, default=8000, metavar="N",
+                       help="port to bind (default 8000)")
+
     short = p.add_argument_group("shorthand")
     short.add_argument("--lichess", action="store_true",
                        help=f"same as --mode {ONLINE_HUMAN}")
@@ -114,8 +124,21 @@ def request_from_args(args) -> GameRequest:
     )
 
 
-def main(argv: Optional[list] = None) -> int:
+def _uvicorn(app, host: str, port: int) -> None:
+    """Imported here so the terminal modes do not pay for the web stack."""
+    import uvicorn
+    uvicorn.run(app, host=host, port=port)
+
+
+def main(argv: Optional[list] = None, run_server=None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.serve:
+        from .api.app import create_app
+        print(f"Serving on http://{args.host}:{args.port}")
+        (run_server or _uvicorn)(create_app(), args.host, args.port)
+        return 0
+
     if args.lichess_ai is not None and args.ai_level is None:
         args.ai_level = args.lichess_ai
 

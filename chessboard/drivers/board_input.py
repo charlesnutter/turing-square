@@ -13,7 +13,7 @@ the loop can be held by a single input.
 import re
 import sys
 from abc import ABC, abstractmethod
-from typing import Callable, Iterable, Iterator, Optional
+from typing import Callable, Iterable, Iterator, Optional, Tuple
 
 import chess
 
@@ -24,28 +24,42 @@ import chess
 UCI = re.compile(r"^[a-h][1-8][a-h][1-8][qrbnQRBN]?$")
 
 
-def parse_move(board: chess.Board, text: str,
-               echo: Callable[[str], None] = lambda _: None) -> Optional[chess.Move]:
-    """SAN or UCI to a Move, or None with an explanation echoed.
+def read_move(board: chess.Board,
+              text: str) -> Tuple[Optional[chess.Move], Optional[str]]:
+    """SAN or UCI to a Move, or None and the reason it could not be read.
+
+    The reason is returned rather than printed because not every caller has a
+    terminal. Losing it is how an illegal-but-perfectly-spelled `Qd5` came back
+    over HTTP as "not a move I can read", which sends a player hunting for a
+    typo that is not there.
 
     UCI is matched first: python-chess's SAN parser also accepts UCI-shaped text
     and then raises before a Move object exists, which would stop an illegal move
-    ever reaching the core's explainer.
+    ever reaching the core's explainer -- and the core explains it far better
+    than the parser can.
     """
     text = text.strip()
     if not text:
-        return None
+        return None, None
     if UCI.match(text):
-        return chess.Move.from_uci(text.lower())
+        return chess.Move.from_uci(text.lower()), None
     try:
-        return board.parse_san(text)
+        return board.parse_san(text), None
     except chess.AmbiguousMoveError:
-        echo(f"  ?  {text} is ambiguous -- name the file or rank, as in Nbd2")
+        return None, f"{text} is ambiguous -- name the file or rank, as in Nbd2"
     except chess.IllegalMoveError:
-        echo(f"  ?  {text} is not legal in this position")
+        return None, f"{text} is not legal in this position"
     except chess.InvalidMoveError:
-        echo(f"  ?  {text!r} is not a move I can read")
-    return None
+        return None, f"{text!r} is not a move I can read"
+
+
+def parse_move(board: chess.Board, text: str,
+               echo: Callable[[str], None] = lambda _: None) -> Optional[chess.Move]:
+    """`read_move` for a caller that would rather print the reason than read it."""
+    move, reason = read_move(board, text)
+    if reason:
+        echo(f"  ?  {reason}")
+    return move
 
 
 class BoardInput(ABC):

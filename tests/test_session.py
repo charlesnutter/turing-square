@@ -247,3 +247,56 @@ def test_both_sides_can_be_engines():
     assert until(lambda: game.san_history[:2] == ["e4", "e5"]), game.san_history
     bus.post("keyboard", "quit")
     thread.join(TIMEOUT)
+
+
+# --------------------------------------------------------------------------
+# what a watcher needs -- the API pushes state, so it has to be told
+# --------------------------------------------------------------------------
+
+def test_a_watcher_is_told_after_a_move_is_played():
+    seen = []
+    game, session = make(echo=lambda _: None)
+    session.on_change = lambda: seen.append(game.ply)
+    bus = EventBus()
+    bus.post("api", "e4")
+    bus.post("api", "quit")
+    session.run(bus)
+    assert 1 in seen
+
+
+def test_a_watcher_is_told_even_when_a_move_was_refused():
+    """The client may have drawn an optimistic board. It has to be corrected."""
+    seen = []
+    game, session = make(echo=lambda _: None)
+    session.on_change = lambda: seen.append(game.fen)
+    bus = EventBus()
+    bus.post("api", "e5")           # illegal for White
+    bus.post("api", "quit")
+    session.run(bus)
+    assert seen, "nothing was pushed after the refusal"
+
+
+def test_a_session_says_when_an_engine_is_thinking():
+    """The view greys itself out from this, because typed moves are refused."""
+    asked = threading.Event()
+    release = threading.Event()
+
+    class SlowEngine:
+        def play(self, board):
+            asked.set()
+            release.wait(TIMEOUT)
+            return chess.Move.from_uci("e7e5")
+
+    game, session = make(engines={chess.BLACK: SlowEngine()})
+    assert session.thinking is False
+    bus = EventBus()
+    thread, _ = run_in_thread(session, bus)
+    bus.post("keyboard", "e4")
+    assert asked.wait(TIMEOUT)
+    assert session.thinking is True
+
+    release.set()
+    assert until(lambda: game.ply == 2)
+    assert session.thinking is False
+    bus.post("keyboard", "quit")
+    thread.join(TIMEOUT)

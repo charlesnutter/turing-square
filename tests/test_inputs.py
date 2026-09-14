@@ -8,7 +8,7 @@ one loop without any of them blocking the others.
 
 import chess
 
-from chessboard.drivers.board_input import BoardInput, KeyboardInput
+from chessboard.drivers.board_input import BoardInput, KeyboardInput, read_move
 from chessboard.events import EOF, EventBus
 
 
@@ -66,3 +66,44 @@ def test_any_iterable_of_intent_satisfies_the_interface():
 
     frames = list(FakeBoard())
     assert frames == [0xFFFF00000000FFFF]
+
+
+# --------------------------------------------------------------------------
+# reading a move, and why it could not be read
+# --------------------------------------------------------------------------
+
+def test_a_legal_san_move_reads_with_no_complaint():
+    move, reason = read_move(chess.Board(), "e4")
+    assert move == chess.Move.from_uci("e2e4")
+    assert reason is None
+
+
+def test_uci_reads_even_when_the_move_is_illegal():
+    """The core explains an illegal move far better than the parser can, so an
+    unplayable UCI move must survive to reach it."""
+    move, reason = read_move(chess.Board(), "e2e5")
+    assert move == chess.Move.from_uci("e2e5")
+    assert reason is None
+
+
+def test_illegal_san_says_it_is_illegal_rather_than_unreadable():
+    """`Qd5` is perfectly readable. Saying otherwise sends the player hunting
+    for a typo in a move they spelled correctly."""
+    move, reason = read_move(chess.Board(), "Qd5")
+    assert move is None
+    assert "not legal" in reason
+    assert "cannot read" not in reason and "not a move I can read" not in reason
+
+
+def test_ambiguous_san_says_how_to_disambiguate():
+    # Both rooks reach d1 -- the king is off the rank, so neither is blocked.
+    board = chess.Board("4k3/8/8/8/4K3/8/8/R6R w - - 0 1")
+    move, reason = read_move(board, "Rd1")
+    assert move is None
+    assert "ambiguous" in reason
+
+
+def test_nonsense_says_it_cannot_be_read():
+    move, reason = read_move(chess.Board(), "banana")
+    assert move is None
+    assert "not a move I can read" in reason
