@@ -4,6 +4,8 @@ Most of this needs no Stockfish: a fake engine is enough to prove the game core
 cannot tell one move source from another, which is the property that matters.
 """
 
+import threading
+
 import chess
 import pytest
 
@@ -11,8 +13,8 @@ from chessboard.core.engine import (
     ChessEngine, StockfishEngine, Strength, open_engine,
 )
 from chessboard.core.game import Game
-from chessboard.drivers.board_input import BoardInput, EngineInput
 from chessboard.drivers.led import ConsoleLEDDriver
+from chessboard.events import EventBus
 from chessboard.session import Session
 
 needs_stockfish = pytest.mark.skipif(
@@ -71,48 +73,51 @@ class FakeEngine:
         return sorted(board.legal_moves, key=lambda m: m.uci())[0]
 
 
-class ScriptedInput(BoardInput):
-    def __init__(self, ucis):
-        self._moves = iter(ucis)
-
-    def next_move(self, board):
-        return chess.Move.from_uci(next(self._moves))
+def quiet_session(game, engines=None):
+    return Session(game, ConsoleLEDDriver(echo=lambda _: None),
+                   echo=lambda _: None, engines=engines or {}, inputs=[])
 
 
-def test_engine_input_supplies_a_legal_move():
-    board = chess.Board()
-    move = EngineInput(FakeEngine()).next_move(board)
-    assert move in board.legal_moves
+def play_until(session, game, ply, typed=()):
+    """Run the loop off-thread, feed it lines, and stop once the game gets there.
+
+    The engine answers on its own thread, so the test cannot simply queue
+    everything up front and call run() -- it has to watch the game advance.
+    """
+    bus = EventBus()
+    for text in typed:
+        bus.post("keyboard", text)
+    thread = threading.Thread(target=lambda: session.run(bus), daemon=True)
+    thread.start()
+    tick = threading.Event()
+    for _ in range(400):
+        if game.ply >= ply:
+            break
+        tick.wait(0.005)
+    bus.post("keyboard", "quit")
+    thread.join(2.0)
 
 
-def test_session_alternates_between_two_different_move_sources():
+def test_the_session_alternates_between_a_keyboard_and_an_engine():
     """The core must not be able to tell a keyboard from an engine."""
     game = Game()
     fake = FakeEngine()
-    session = Session(
-        game,
-        {chess.WHITE: ScriptedInput(["e2e4", "g1f3"]), chess.BLACK: EngineInput(fake)},
-        ConsoleLEDDriver(echo=lambda _: None),
-        echo=lambda _: None,
-    )
-    for _ in range(4):
-        if game.is_over:
-            break
-        source = session.input_for(game.turn)
-        game.play(source.next_move(game.board))
+    play_until(quiet_session(game, {chess.BLACK: fake}), game, 2, typed=["e4"])
 
     assert game.san_history[0] == "e4"
-    assert fake.calls == 2          # the engine moved on both Black turns
-    assert game.ply == 4
+    assert fake.calls == 1           # the engine answered Black's turn
+    assert game.ply == 2
 
 
-def test_single_input_still_serves_both_sides():
-    """Local two-player must keep working -- one source, both colours."""
+def test_no_engine_at_all_is_local_two_player():
+    """Both colours typed by people -- the same class, with an empty mapping."""
     game = Game()
-    shared = ScriptedInput(["e2e4", "e7e5"])
-    session = Session(game, shared, ConsoleLEDDriver(echo=lambda _: None),
-                      echo=lambda _: None)
-    assert session.input_for(chess.WHITE) is session.input_for(chess.BLACK) is shared
+    session = quiet_session(game)
+    bus = EventBus()
+    for text in ("e4", "e5", "quit"):
+        bus.post("keyboard", text)
+    session.run(bus)
+    assert game.san_history == ["e4", "e5"]
 
 
 # --------------------------------------------------------------------------
@@ -169,14 +174,7 @@ def test_a_non_stockfish_engine_satisfies_the_interface():
 def test_an_engine_without_strength_knobs_still_drives_a_session():
     """Maia has no UCI_Elo or Skill Level -- you pick a net. That must be fine."""
     game = Game()
-    session = Session(
-        game,
-        {chess.WHITE: ScriptedInput(["e2e4"]), chess.BLACK: EngineInput(ToyEngine())},
-        ConsoleLEDDriver(echo=lambda _: None),
-        echo=lambda _: None,
-    )
-    for _ in range(2):
-        game.play(session.input_for(game.turn).next_move(game.board))
+    play_until(quiet_session(game, {chess.BLACK: ToyEngine()}), game, 2, typed=["e4"])
     assert game.ply == 2
 
 

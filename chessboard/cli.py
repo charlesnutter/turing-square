@@ -17,7 +17,6 @@ from .core.engine import (
     ENGINES, EngineUnavailable, Strength, open_engine,
 )
 from .core.game import Game
-from .drivers.board_input import EngineInput, KeyboardInput
 from .drivers.led import ConsoleLEDDriver
 from .lichess.client import Client, LichessError, load_token
 from .lichess.play import LichessGame, wait_for_game
@@ -143,15 +142,9 @@ def main(argv: Optional[list] = None) -> int:
 # ---- local ----------------------------------------------------------------
 
 def _local_human(game: Game, leds: ConsoleLEDDriver) -> int:
-    keyboard = KeyboardInput()
-    session = Session(game, keyboard, leds)
-    keyboard._on_command = session.handle_command
     print("Two players, one keyboard. SAN or UCI; "
           "'moves', 'takeback', 'fen', 'quit'.")
-    try:
-        session.run()
-    finally:
-        session.close()
+    Session(game, leds).run()
     return 0
 
 
@@ -170,21 +163,11 @@ def _local_ai(request: GameRequest, game: Game, leds: ConsoleLEDDriver) -> int:
         print(f"{exc}", file=sys.stderr)
         return 1
 
-    keyboard = KeyboardInput()
     you = chess.BLACK if request.black else chess.WHITE
-    session = Session(
-        game,
-        {you: keyboard, not you: EngineInput(engine, announce=print, name=engine.name)},
-        leds,
-    )
-    keyboard._on_command = session.handle_command
     print(f"You are {'Black' if request.black else 'White'} against "
           f"{engine.describe()}, {_limit_text(limit)}.")
     print("SAN or UCI; 'moves', 'takeback', 'fen', 'quit'.")
-    try:
-        session.run()
-    finally:
-        session.close()
+    Session(game, leds, engines={not you: engine}).run()
     return 0
 
 

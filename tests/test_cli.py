@@ -80,3 +80,28 @@ def test_ai_level_is_rejected_at_parse_time(level):
 def test_elo_and_skill_cannot_both_be_given():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["--elo", "1500", "--skill", "3"])
+
+
+# --------------------------------------------------------------------------
+# shutdown
+# --------------------------------------------------------------------------
+
+def test_quitting_a_game_exits_cleanly():
+    """The input producer is a daemon thread blocked on a read when the loop
+    ends. If it is also holding stdout's lock at that moment, CPython's
+    finalizer cannot flush and the process aborts *after* a clean `quit` --
+    which looks like a crash to anyone watching.
+
+    It is a race, so once proves nothing; a few runs do. Before the producer
+    stopped writing its own prompt this failed most times.
+    """
+    import subprocess
+    import sys
+
+    for _ in range(5):
+        done = subprocess.run(
+            [sys.executable, "-m", "chessboard"],
+            input="e4\ne5\nquit\n", capture_output=True, text=True, timeout=30,
+        )
+        assert "Fatal Python error" not in done.stderr, done.stderr
+        assert done.returncode == 0, done.stderr
