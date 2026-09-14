@@ -35,6 +35,11 @@ than quietly switching.
   a single source is what made browser-played moves invisible online, and it is
   the same failure Phase 2 would hit with a physical board, a tablet and an
   engine all producing moves at once. Add a producer; do not add a blocking read.
+  This holds for the local session as much as the Lichess one: a `BoardInput`
+  *yields* intent and the loop decides what it means against the current board,
+  so no single source can ever hold the loop. An engine is the exception that
+  proves the rule — it has nothing to say until it is asked, so it is asked on
+  its own thread and posts its answer back.
 - **Move detection matches, it does not diff.** Generate the occupancy pattern
   every legal move would produce and match against that list. A raw diff cannot
   resolve captures, castling or en passant.
@@ -337,6 +342,14 @@ entries short and concrete: what was assumed, what was true, what to do instead.
   the opponent's turn does not fail as "not your turn" — it fails as *"not legal
   in this position"*, because `parse_san` read it as a move for them. Check whose
   turn it is **before** parsing, or the error blames the wrong thing entirely.
+
+- **Never write to stdout from a producer thread.** `input()` prints its prompt
+  from whichever thread calls it. With the reader on a daemon thread, holding
+  stdout's lock there while the main thread finishes means CPython's finalizer
+  cannot flush, and a clean `quit` aborts with `Fatal Python error:
+  _enter_buffered_busy` *after* the game ended. It is a race — it passed once
+  under pytest and failed twice by hand — so a regression test for it has to run
+  the process several times. Producers read; the loop prints.
 
 - **Check where a tool writes before relying on it.** `npx skills add` installs to
   the agent's own directory — `.claude/skills/` for Claude Code — which is
