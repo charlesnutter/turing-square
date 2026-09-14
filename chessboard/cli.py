@@ -21,13 +21,11 @@ from .drivers.board_input import EngineInput, KeyboardInput
 from .drivers.led import ConsoleLEDDriver
 from .lichess.client import Client, LichessError, load_token
 from .lichess.play import LichessGame, wait_for_game
+from .modes import (
+    LOCAL_AI, LOCAL_HUMAN, MODES, ONLINE_AI, ONLINE_HUMAN, GameRequest,
+    resolve_mode,
+)
 from .session import Session
-
-LOCAL_HUMAN = "local-human"
-LOCAL_AI = "local-ai"
-ONLINE_HUMAN = "online-human"
-ONLINE_AI = "online-ai"
-MODES = (LOCAL_HUMAN, LOCAL_AI, ONLINE_HUMAN, ONLINE_AI)
 
 MODE_HELP = {
     LOCAL_HUMAN: "two players sharing one board",
@@ -105,37 +103,16 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def resolve_mode(args) -> Tuple[Optional[str], Optional[str]]:
-    """Work out the mode from an explicit flag or the options given.
-
-    Returns (mode, error). Inference is a convenience; anything ambiguous is an
-    error rather than a guess, because silently playing the wrong opponent is a
-    worse outcome than being told to be explicit.
-    """
-    implied = []
-    if args.lichess:
-        implied.append(ONLINE_HUMAN)
-    if args.lichess_ai is not None or args.ai_level is not None or args.game_id:
-        implied.append(ONLINE_AI if not args.game_id else ONLINE_HUMAN)
-    if args.elo is not None or args.skill is not None:
-        implied.append(LOCAL_AI)
-
-    distinct = set(implied)
-    if args.mode:
-        conflicting = distinct - {args.mode}
-        # --game is fine with either online mode.
-        if conflicting and not (args.mode.startswith("online")
-                                and conflicting <= {ONLINE_HUMAN, ONLINE_AI}):
-            return None, (f"--mode {args.mode} conflicts with the other options "
-                          f"given ({', '.join(sorted(conflicting))})")
-        return args.mode, None
-
-    if len(distinct) > 1:
-        return None, ("those options imply more than one mode "
-                      f"({', '.join(sorted(distinct))}) -- pass --mode explicitly")
-    if distinct:
-        return implied[0], None
-    return LOCAL_HUMAN, None
+def request_from_args(args) -> GameRequest:
+    """Argparse's Namespace into the shared request the resolver understands."""
+    return GameRequest(
+        mode=args.mode, black=args.black, fen=args.fen,
+        engine=args.engine, elo=args.elo, skill=args.skill,
+        depth=args.depth, movetime=args.movetime, threads=args.threads,
+        ai_level=args.ai_level, game_id=args.game_id, color=args.color,
+        token_file=args.token_file,
+        lichess=args.lichess, lichess_ai=args.lichess_ai,
+    )
 
 
 def main(argv: Optional[list] = None) -> int:
@@ -143,13 +120,14 @@ def main(argv: Optional[list] = None) -> int:
     if args.lichess_ai is not None and args.ai_level is None:
         args.ai_level = args.lichess_ai
 
-    mode, error = resolve_mode(args)
+    request = request_from_args(args)
+    mode, error = resolve_mode(request)
     if error:
         print(error, file=sys.stderr)
         return 2
 
     try:
-        game = Game(args.fen)
+        game = Game(request.fen)
     except ValueError as exc:
         print(f"bad FEN: {exc}", file=sys.stderr)
         return 2
@@ -158,8 +136,8 @@ def main(argv: Optional[list] = None) -> int:
     if mode == LOCAL_HUMAN:
         return _local_human(game, leds)
     if mode == LOCAL_AI:
-        return _local_ai(args, game, leds)
-    return _online(args, leds, vs_ai=(mode == ONLINE_AI))
+        return _local_ai(request, game, leds)
+    return _online(request, leds, vs_ai=(mode == ONLINE_AI))
 
 
 # ---- local ----------------------------------------------------------------
@@ -177,30 +155,30 @@ def _local_human(game: Game, leds: ConsoleLEDDriver) -> int:
     return 0
 
 
-def _local_ai(args, game: Game, leds: ConsoleLEDDriver) -> int:
+def _local_ai(request: GameRequest, game: Game, leds: ConsoleLEDDriver) -> int:
     try:
-        strength = Strength(elo=args.elo, skill=args.skill, threads=args.threads)
+        strength = Strength(elo=request.elo, skill=request.skill, threads=request.threads)
     except ValueError as exc:
         print(f"{exc}", file=sys.stderr)
         return 2
 
-    limit = (chess.engine.Limit(time=args.movetime / 1000.0) if args.movetime
-             else chess.engine.Limit(depth=args.depth))
+    limit = (chess.engine.Limit(time=request.movetime / 1000.0) if request.movetime
+             else chess.engine.Limit(depth=request.depth))
     try:
-        engine = open_engine(args.engine, strength=strength, limit=limit)
+        engine = open_engine(request.engine, strength=strength, limit=limit)
     except EngineUnavailable as exc:
         print(f"{exc}", file=sys.stderr)
         return 1
 
     keyboard = KeyboardInput()
-    you = chess.BLACK if args.black else chess.WHITE
+    you = chess.BLACK if request.black else chess.WHITE
     session = Session(
         game,
         {you: keyboard, not you: EngineInput(engine, announce=print, name=engine.name)},
         leds,
     )
     keyboard._on_command = session.handle_command
-    print(f"You are {'Black' if args.black else 'White'} against "
+    print(f"You are {'Black' if request.black else 'White'} against "
           f"{engine.describe()}, {_limit_text(limit)}.")
     print("SAN or UCI; 'moves', 'takeback', 'fen', 'quit'.")
     try:
@@ -212,9 +190,9 @@ def _local_ai(args, game: Game, leds: ConsoleLEDDriver) -> int:
 
 # ---- online ---------------------------------------------------------------
 
-def _online(args, leds: ConsoleLEDDriver, vs_ai: bool) -> int:
+def _online(request: GameRequest, leds: ConsoleLEDDriver, vs_ai: bool) -> int:
     try:
-        client = Client(load_token(args.token_file))
+        client = Client(load_token(request.token_file))
         me = client.username()
     except LichessError as exc:
         print(f"{exc}", file=sys.stderr)
@@ -222,11 +200,11 @@ def _online(args, leds: ConsoleLEDDriver, vs_ai: bool) -> int:
     print(f"Signed in as {me}.")
 
     try:
-        if args.game_id:
-            game_id = args.game_id
+        if request.game_id:
+            game_id = request.game_id
         elif vs_ai:
-            level = args.ai_level if args.ai_level is not None else 1
-            created = client.challenge_ai(level, color=args.color)
+            level = request.ai_level if request.ai_level is not None else 1
+            created = client.challenge_ai(level, color=request.color)
             game_id = created.get("id")
             print(f"  challenged the Lichess AI at level {level}")
         else:

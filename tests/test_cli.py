@@ -7,16 +7,18 @@ wrong opponent is worse than being told to be explicit.
 
 import pytest
 
-from chessboard.cli import (
-    LOCAL_AI, LOCAL_HUMAN, ONLINE_AI, ONLINE_HUMAN, build_parser, resolve_mode,
+from chessboard.cli import build_parser, request_from_args
+from chessboard.modes import (
+    LOCAL_AI, LOCAL_HUMAN, ONLINE_AI, ONLINE_HUMAN, resolve_mode,
 )
 
 
 def mode_for(*argv):
+    """Parse, adapt to a GameRequest, resolve -- the path `main` actually takes."""
     args = build_parser().parse_args(list(argv))
     if args.lichess_ai is not None and args.ai_level is None:
         args.ai_level = args.lichess_ai
-    return resolve_mode(args)
+    return resolve_mode(request_from_args(args))
 
 
 @pytest.mark.parametrize("argv,expected", [
