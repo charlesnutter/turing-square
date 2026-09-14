@@ -87,9 +87,17 @@ class Session:
         if command in ("quit", "q", "exit"):
             return "aborted"
         if command in ("takeback", "undo"):
-            # Two plies, so control comes back to the same player.
-            undone = [m for m in (self.game.takeback(), self.game.takeback()) if m]
-            self.echo(f"  took back {len(undone)} ply" if undone
+            # Go back far enough that it is a person's move again. With an
+            # engine in the other seat that is two plies -- one would hand the
+            # turn straight back to it and it would simply move again. With two
+            # people it is one, because the player who just moved wants their
+            # own move back, not their opponent's as well.
+            undone = 0
+            while self.game.ply and (undone == 0 or self.game.turn in self.engines):
+                if self.game.takeback() is None:
+                    break
+                undone += 1
+            self.echo(f"  took back {undone} ply" if undone
                       else "  nothing to take back")
             # Whatever was being thought about is for a board that is now gone.
             self._thinking_ply = None

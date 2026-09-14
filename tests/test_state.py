@@ -45,14 +45,49 @@ def test_the_last_move_carries_both_squares_and_how_to_name_it():
     assert last == {"from": "e2", "to": "e4", "uci": "e2e4", "san": "e4"}
 
 
-def test_history_is_san_in_order():
+def test_history_carries_what_a_client_needs_to_navigate():
+    """Each entry is self-describing: what to print, what to highlight, and the
+    position to draw if the player scrubs back to it."""
     game = Game()
     for text in ("e4", "e5", "Nf3"):
         game.play_text(text)
     state = snapshot(game)
-    assert state["history"] == ["e4", "e5", "Nf3"]
+
+    assert [entry["san"] for entry in state["history"]] == ["e4", "e5", "Nf3"]
+    assert state["history"][0]["uci"] == "e2e4"
+    assert chess.Board(state["history"][0]["fen"]).turn == chess.BLACK
+    assert state["history"][-1]["fen"] == game.fen
     assert state["movetext"] == "1. e4 e5 2. Nf3"
     assert state["ply"] == 3
+
+
+def test_the_starting_position_is_carried_so_ply_zero_can_be_drawn():
+    game = Game()
+    game.play_text("e4")
+    assert snapshot(game)["start_fen"] == chess.STARTING_FEN
+
+
+def test_takeback_is_offered_when_there_is_something_to_take_back():
+    """The client greys the button from this rather than firing a request that
+    comes back 400."""
+    game = Game()
+    assert snapshot(game)["can"]["takeback"] is False
+    game.play_text("e4")
+    assert snapshot(game)["can"]["takeback"] is True
+
+
+def test_takeback_is_not_offered_once_the_game_is_over():
+    game = Game("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 3")
+    game.play_text("Qh4#")
+    assert snapshot(game)["can"]["takeback"] is False
+
+
+def test_takeback_can_be_refused_by_the_caller():
+    """Lichess games have no takeback here, and the client must be told so
+    rather than working it out from the mode string."""
+    game = Game()
+    game.play_text("e4")
+    assert snapshot(game, takeback=False)["can"]["takeback"] is False
 
 
 def test_check_is_reported_so_the_board_can_mark_the_king():
@@ -101,3 +136,13 @@ def test_the_snapshot_is_json_serialisable():
     game = Game()
     game.play_text("e4")
     json.dumps(snapshot(game, mode="local-ai", engines={chess.BLACK: "toy"}))
+
+
+def test_history_does_not_bloat_the_push():
+    """Every state change pushes the whole thing, so the per-ply cost matters."""
+    import json
+    game = Game()
+    for uci in [m.uci() for m in list(game.legal_moves())[:1]]:
+        game.play_text(uci)
+    one_ply = len(json.dumps(snapshot(game)))
+    assert one_ply < 2000, one_ply

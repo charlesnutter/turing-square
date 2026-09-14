@@ -72,12 +72,21 @@ class Game:
         self.board = chess.Board(fen) if fen else chess.Board()
         self._initial_fen = self.board.fen()
         self._san: list[str] = []
+        # The position each move produced, so a client can show move 12 without
+        # replaying the game for itself -- a rules engine in the browser is
+        # exactly what python-chess owning the rules is meant to avoid.
+        self._fens: list[str] = []
 
     # ---- state -------------------------------------------------------------
 
     @property
     def fen(self) -> str:
         return self.board.fen()
+
+    @property
+    def initial_fen(self) -> str:
+        """The position the game began from -- ply 0, for scrubbing back to it."""
+        return self._initial_fen
 
     @property
     def turn(self) -> chess.Color:
@@ -118,6 +127,7 @@ class Game:
             raise IllegalMove(move, explain_illegal(self.board, move))
         self._san.append(self.board.san(move))
         self.board.push(move)
+        self._fens.append(self.board.fen())
         return move
 
     def play_text(self, text: str) -> chess.Move:
@@ -139,6 +149,7 @@ class Game:
         if not self.board.move_stack:
             return None
         self._san.pop()
+        self._fens.pop()
         return self.board.pop()
 
     # ---- history -----------------------------------------------------------
@@ -146,6 +157,11 @@ class Game:
     @property
     def san_history(self) -> list[str]:
         return list(self._san)
+
+    @property
+    def fen_history(self) -> list[str]:
+        """The position after each ply, parallel to `san_history`."""
+        return list(self._fens)
 
     def movetext(self) -> str:
         out = []

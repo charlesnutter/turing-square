@@ -42,6 +42,11 @@ def client():
     service.stop()
 
 
+def sans(state):
+    """The move list as plain SAN -- history entries also carry uci and fen."""
+    return [entry["san"] for entry in state.get("history", [])]
+
+
 def pushed_until(socket, predicate, limit=6, timeout=5.0):
     """Read pushed states until one matches, without ever hanging the suite.
 
@@ -119,7 +124,7 @@ def test_an_empty_body_starts_two_player(client):
 def test_a_legal_move_is_played(client):
     client.post("/api/game", json={"mode": "local-human"})
     body = client.post("/api/move", json={"move": "e4"}).json()
-    assert body["history"] == ["e4"]
+    assert sans(body) == ["e4"]
     assert body["last_move"] == {"from": "e2", "to": "e4", "uci": "e2e4", "san": "e4"}
 
 
@@ -146,7 +151,8 @@ def test_a_command_is_carried_out(client):
     client.post("/api/game", json={"mode": "local-human"})
     client.post("/api/move", json={"move": "e4"})
     client.post("/api/move", json={"move": "e5"})
-    assert client.post("/api/command", json={"command": "takeback"}).json()["ply"] == 0
+    # Two people, so takeback undoes one move, not both.
+    assert client.post("/api/command", json={"command": "takeback"}).json()["ply"] == 1
 
 
 def test_an_unknown_command_is_refused(client):
@@ -207,8 +213,8 @@ def test_a_move_made_over_http_is_pushed_to_the_socket(client):
     with client.websocket_connect("/ws") as socket:
         assert socket.receive_json()["ply"] == 0           # the state on connect
         client.post("/api/move", json={"move": "e4"})
-        seen = pushed_until(socket, lambda s: s["history"] == ["e4"])
-    assert any(s["history"] == ["e4"] and s["turn"] == "black" for s in seen), seen
+        seen = pushed_until(socket, lambda s: sans(s) == ["e4"])
+    assert any(sans(s) == ["e4"] and s["turn"] == "black" for s in seen), seen
 
 
 def test_an_engine_s_own_move_is_pushed_without_anyone_asking(client):
@@ -217,8 +223,8 @@ def test_an_engine_s_own_move_is_pushed_without_anyone_asking(client):
     with client.websocket_connect("/ws") as socket:
         socket.receive_json()
         client.post("/api/move", json={"move": "e4"})
-        seen = pushed_until(socket, lambda s: s["history"] == ["e4", "e5"])
-    assert any(s["history"] == ["e4", "e5"] for s in seen), seen
+        seen = pushed_until(socket, lambda s: sans(s) == ["e4", "e5"])
+    assert any(sans(s) == ["e4", "e5"] for s in seen), seen
 
 
 def test_two_sockets_both_see_the_move(client):
@@ -229,7 +235,7 @@ def test_two_sockets_both_see_the_move(client):
         first.receive_json()
         second.receive_json()
         client.post("/api/move", json={"move": "d4"})
-        on_first = pushed_until(first, lambda s: s["history"] == ["d4"])
-        on_second = pushed_until(second, lambda s: s["history"] == ["d4"])
-    assert any(s["history"] == ["d4"] for s in on_first), on_first
-    assert any(s["history"] == ["d4"] for s in on_second), on_second
+        on_first = pushed_until(first, lambda s: sans(s) == ["d4"])
+        on_second = pushed_until(second, lambda s: sans(s) == ["d4"])
+    assert any(sans(s) == ["d4"] for s in on_first), on_first
+    assert any(sans(s) == ["d4"] for s in on_second), on_second
