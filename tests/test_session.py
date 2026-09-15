@@ -94,13 +94,40 @@ def test_a_command_is_not_parsed_as_a_move():
     assert any(chess.STARTING_FEN in line for line in lines)
 
 
-def test_takeback_returns_control_to_the_same_player():
+def test_takeback_undoes_one_move_when_both_sides_are_people():
+    """Two players sharing a board: the one who just moved wants their own move
+    back. Taking the opponent's as well is not what the button says."""
     game, session = make()
     bus = EventBus()
     for text in ("e4", "e5", "takeback", "quit"):
         bus.post("keyboard", text)
     session.run(bus)
+    assert game.san_history == ["e4"]
+
+
+def test_takeback_undoes_two_moves_when_an_engine_holds_the_other_seat():
+    """One would hand the turn straight back to the engine, which would simply
+    move again -- so it goes back far enough that it is your move."""
+    game, session = make(engines={chess.BLACK: ScriptedEngine(["e7e5"])})
+    bus = EventBus()
+    thread, _ = run_in_thread(session, bus)
+    bus.post("keyboard", "e4")
+    assert until(lambda: game.ply == 2)
+    bus.post("keyboard", "takeback")
+    assert until(lambda: game.ply == 0), game.san_history
+    bus.post("keyboard", "quit")
+    thread.join(TIMEOUT)
+
+
+def test_taking_back_says_so_when_there_is_nothing_to_take_back():
+    lines = []
+    game, session = make(echo=lines.append)
+    bus = EventBus()
+    bus.post("keyboard", "takeback")
+    bus.post("keyboard", "quit")
+    session.run(bus)
     assert game.ply == 0
+    assert any("nothing to take back" in line for line in lines)
 
 
 def test_quit_ends_the_session():

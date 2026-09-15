@@ -52,6 +52,11 @@ def service():
     svc.stop()
 
 
+def sans(state):
+    """The move list as plain SAN -- history entries also carry uci and fen."""
+    return [entry["san"] for entry in state.get("history", [])]
+
+
 def until(predicate, timeout=2.0):
     tick = threading.Event()
     for _ in range(int(timeout * 200)):
@@ -126,14 +131,14 @@ def test_starting_a_second_game_replaces_the_first(service):
 def test_a_move_is_played_and_the_resulting_state_comes_back(service):
     service.start(GameRequest(mode=LOCAL_HUMAN))
     state = service.play("e4")
-    assert state["history"] == ["e4"]
+    assert sans(state) == ["e4"]
     assert state["last_move"]["uci"] == "e2e4"
     assert state["turn"] == "black"
 
 
 def test_uci_is_accepted_as_well_as_san(service):
     service.start(GameRequest(mode=LOCAL_HUMAN))
-    assert service.play("g1f3")["history"] == ["Nf3"]
+    assert sans(service.play("g1f3")) == ["Nf3"]
 
 
 def test_an_illegal_move_is_refused_with_a_reason_and_changes_nothing(service):
@@ -193,7 +198,7 @@ def test_a_move_on_the_engine_s_turn_is_refused(service):
             svc.play("Nf3")
         assert svc.state()["thinking"] is True
         release.set()
-        assert until(lambda: svc.state()["history"] == ["e4", "e5"])
+        assert until(lambda: sans(svc.state()) == ["e4", "e5"])
         assert svc.state()["thinking"] is False
     finally:
         release.set()
@@ -207,13 +212,13 @@ def test_a_failed_start_leaves_the_running_game_alone(service):
     with pytest.raises(ServiceError):
         service.start(GameRequest(mode=LOCAL_HUMAN, fen="not a position"))
     assert service.running is True
-    assert service.state()["history"] == ["e4"]
+    assert sans(service.state()) == ["e4"]
 
 
 def test_the_engine_answers_without_being_asked_over_http(service):
     service.start(GameRequest(mode=LOCAL_AI, skill=1))
     service.play("e4")
-    assert until(lambda: service.state()["history"] == ["e4", "e5"])
+    assert until(lambda: sans(service.state()) == ["e4", "e5"])
 
 
 def test_a_move_cannot_be_played_before_a_game_exists(service):
@@ -223,12 +228,19 @@ def test_a_move_cannot_be_played_before_a_game_exists(service):
 
 # ---- commands -------------------------------------------------------------
 
-def test_takeback_returns_control_to_the_same_player(service):
+def test_takeback_undoes_one_move_for_two_people(service):
     service.start(GameRequest(mode=LOCAL_HUMAN))
     service.play("e4")
     service.play("e5")
-    state = service.command("takeback")
-    assert state["ply"] == 0
+    assert sans(service.command("takeback")) == ["e4"]
+
+
+def test_takeback_undoes_the_engine_s_reply_as_well(service):
+    """Otherwise the turn goes straight back to the engine, which moves again."""
+    service.start(GameRequest(mode=LOCAL_AI, skill=1))
+    service.play("e4")
+    assert until(lambda: service.state()["ply"] == 2)
+    assert sans(service.command("takeback")) == []
 
 
 def test_an_unknown_command_is_refused(service):
@@ -269,7 +281,7 @@ def test_a_subscriber_is_pushed_the_state_after_every_change(service):
     service.subscribe(pushed.append)
     service.start(GameRequest(mode=LOCAL_HUMAN))
     service.play("e4")
-    assert until(lambda: any(s["history"] == ["e4"] for s in pushed))
+    assert until(lambda: any(sans(s) == ["e4"] for s in pushed))
 
 
 def test_starting_a_game_is_pushed_to_watchers_who_were_already_connected(service):
@@ -319,7 +331,7 @@ def test_unsubscribing_stops_the_pushes(service):
     service.start(GameRequest(mode=LOCAL_HUMAN))
     cancel()
     service.play("e4")
-    assert not any(s["history"] == ["e4"] for s in pushed)
+    assert not any(sans(s) == ["e4"] for s in pushed)
 
 
 def test_a_subscriber_that_raises_does_not_take_the_loop_down(service):
@@ -333,4 +345,4 @@ def test_a_subscriber_that_raises_does_not_take_the_loop_down(service):
     service.subscribe(good.append)
     service.start(GameRequest(mode=LOCAL_HUMAN))
     service.play("e4")
-    assert until(lambda: any(s["history"] == ["e4"] for s in good))
+    assert until(lambda: any(sans(s) == ["e4"] for s in good))

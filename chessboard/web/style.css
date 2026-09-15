@@ -1,0 +1,235 @@
+/* Phone first. The board is the page; everything else is a panel under it,
+   and only widens into a second column when there is room for one. */
+
+:root {
+  --bg: #17150f;
+  --panel: #201d16;
+  --panel-2: #2a261c;
+  --line: #3a3427;
+  --ink: #f1ece1;
+  --ink-2: #b3ab99;
+  --ink-3: #7d7565;
+  --brass: #d8a441;
+  --light: #e8dcc0;
+  --dark: #9c7a4d;
+  --move: rgba(120, 190, 90, .55);
+  --pick: rgba(216, 164, 65, .55);
+  --warn: #e0674f;
+  --ok: #58c07a;
+  --tap: 44px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f2ec; --panel: #fff; --panel-2: #eae6db; --line: #d8d2c4;
+    --ink: #1d1a13; --ink-2: #4f4839; --ink-3: #857c6a; --brass: #8a6410;
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* `display: flex` on a class beats the user agent's [hidden] rule, so rows
+   that are meant to be hidden show anyway. Settle it here, once. */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* The board must not scroll away under a thumb on a phone. */
+  overscroll-behavior: none;
+}
+
+.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 10px 12px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---------- top bar ---------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+}
+.bar h1 {
+  font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -.01em;
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bar .sub { color: var(--ink-3); font-weight: 400; }
+
+.dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--ink-3); flex: 0 0 auto;
+  transition: background .2s;
+}
+.dot.on { background: var(--ok); }
+.dot.off { background: var(--warn); }
+
+button, select {
+  font: inherit; color: var(--ink);
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0 12px;
+  min-height: var(--tap); cursor: pointer;
+}
+button:disabled { opacity: .38; cursor: default; }
+button.primary { background: var(--brass); border-color: var(--brass); color: #17150f; font-weight: 600; }
+button:focus-visible, select:focus-visible, .sq:focus-visible {
+  outline: 2px solid var(--brass); outline-offset: 2px;
+}
+.icon { padding: 0; width: var(--tap); flex: 0 0 auto; font-size: 17px; }
+
+/* ---------- board ---------- */
+
+.boardwrap { position: relative; }
+
+.board {
+  display: grid;
+  /* Rows as well as columns: without them an empty square has no content to
+     give it height and the rank collapses to a strip. */
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  touch-action: manipulation;
+}
+
+.sq {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--light);
+  border: 0; padding: 0; margin: 0;
+  min-height: 0;                    /* the grid sets the size, not the content */
+  border-radius: 0;
+  cursor: default;
+}
+.sq.d { background: var(--dark); }
+.sq.playable { cursor: pointer; }
+
+.sq img { width: 100%; height: 100%; display: block; pointer-events: none; user-select: none; }
+
+/* a legal destination: a dot on an empty square, a ring on a capture */
+.sq.to::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: 28%; height: 28%; border-radius: 50%;
+  background: var(--move); pointer-events: none;
+}
+.sq.to.occupied::after {
+  width: 88%; height: 88%; background: none;
+  border: 5px solid var(--move); box-sizing: border-box;
+}
+.sq.from { background: var(--pick) !important; }
+.sq.last::before {
+  content: ""; position: absolute; inset: 0;
+  background: var(--move); opacity: .38; pointer-events: none;
+}
+.sq.check::before {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(circle, var(--warn) 0%, transparent 72%);
+  opacity: .85; pointer-events: none;
+}
+
+/* Coordinates take the colour of the opposite square, or they vanish into
+   whichever one they happen to land on. */
+.coord {
+  position: absolute; font-size: 9px; font-weight: 700;
+  color: var(--dark); opacity: .9; pointer-events: none;
+}
+.sq.d .coord { color: var(--light); }
+.coord.f { right: 2px; bottom: 1px; }
+.coord.r { left: 2px; top: 1px; }
+
+/* a veil over the board when it is not yours to touch */
+.veil {
+  position: absolute; inset: 0;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(10, 9, 6, .55);
+  border-radius: 10px;
+  font-size: 14px; font-weight: 600;
+  text-align: center; padding: 16px;
+  color: #f1ece1;
+}
+.veil.show { display: flex; }
+.veil button { margin-top: 10px; }
+.veil .stack { display: flex; flex-direction: column; align-items: center; }
+
+/* ---------- panel ---------- */
+
+.tabs { display: flex; gap: 2px; }
+.tabs button {
+  flex: 1 1 0; border-radius: 8px 8px 0 0; border-bottom-color: transparent;
+  background: var(--panel-2); color: var(--ink-3); font-size: 14px;
+}
+.tabs button[aria-selected="true"] { background: var(--panel); color: var(--ink); font-weight: 600; }
+
+.pane {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 0 0 10px 10px;
+  padding: 12px; min-height: 176px;
+}
+.pane[hidden] { display: none; }
+
+/* move list */
+.moves { display: grid; grid-template-columns: 2.6em 1fr 1fr; gap: 2px 6px; font-size: 14px; }
+.moves .n { color: var(--ink-3); font-variant-numeric: tabular-nums; text-align: right; padding-top: 6px; }
+.moves button {
+  text-align: left; background: none; border: 1px solid transparent;
+  min-height: 34px; padding: 0 8px; border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.moves button:hover { background: var(--panel-2); }
+.moves button[aria-current="true"] { background: var(--brass); color: #17150f; font-weight: 600; }
+.empty { color: var(--ink-3); font-size: 14px; }
+
+/* controls */
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row + .row { margin-top: 10px; }
+.row label { font-size: 13px; color: var(--ink-2); flex: 0 0 auto; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.hint { color: var(--ink-3); font-size: 13px; margin: 8px 0 0; }
+.hint.warn { color: var(--warn); }
+
+.banner {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--brass);
+  border-radius: 0 8px 8px 0; padding: 10px 12px; font-size: 14px;
+}
+
+/* promotion sheet */
+.sheet {
+  position: fixed; inset: 0; z-index: 30;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(10, 9, 6, .6); padding: 16px;
+}
+.sheet.show { display: flex; }
+.sheet .card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px; max-width: 340px; width: 100%;
+}
+.sheet h2 { font-size: 15px; margin: 0 0 10px; }
+.sheet .picks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.sheet .picks button { aspect-ratio: 1; min-height: 0; padding: 6px; }
+.sheet .picks img { width: 100%; height: 100%; }
+
+/* ---------- wider than a phone ---------- */
+
+@media (min-width: 760px) {
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+  .bar { grid-column: 1 / -1; }
+  .boardwrap { grid-column: 1; }
+  .side { grid-column: 2; position: sticky; top: 12px; }
+  .pane { min-height: 320px; }
+}
+
+@media (min-width: 1000px) {
+  .wrap { grid-template-columns: minmax(0, 1fr) 380px; }
+}

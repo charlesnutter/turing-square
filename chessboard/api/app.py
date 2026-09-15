@@ -11,13 +11,17 @@ about it. That is what stops the tablet and the board disagreeing.
 """
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..modes import MODES, GameRequest
 from .service import IDLE, GameService, ServiceError
+
+WEB = Path(__file__).resolve().parent.parent / "web"
 
 
 class NewGame(BaseModel):
@@ -108,6 +112,10 @@ def create_app(service: Optional[GameService] = None) -> FastAPI:
             pass
         finally:
             cancel()
+
+    # Mounted last and at the root, so every /api path and /ws is matched by the
+    # routes above before the static files ever get a look at it.
+    app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
 
     return app
 
